@@ -1,0 +1,68 @@
+# =========================
+# Python / Flask
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Flask instance folder (contains local configuration/secrets)
+instance/
+secure_configs/
+.webassets-cache
+
+# =========================
+# Jupyter / Notebooks
+# =========================
+.ipynb_checkpoints/
+
+
+# =========================
+# Vscode
+# =========================
+.vscode/
+
+# =========================
+# Environments
+# =========================
+.env
+.flaskenv
+.venv
+venv/
+env/
+ENV/
+
+# =========================
+# Project Specific
+# =========================
+# Ignore generated Excel reports from testing
+report_*.xlsx
+*.xlsx
+
+# Databases (if you are using local SQLite for testing)
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
+# =========================
+# OS Generated Files
+# =========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# =========================
+# IDEs and Editors
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

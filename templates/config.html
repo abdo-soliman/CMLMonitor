@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configuration - CMLMonitor</title>
+    <link rel="stylesheet" href="static/css/bootstrap5.3.0.min.css">
+    <link rel="stylesheet" href="static/css/all6.4.0.min.css">
+    <link rel="stylesheet" href="static/css/config.css">
+</head>
+
+<body>
+    <nav class="navbar navbar-expand-lg fixed-top bg-white border-bottom">
+        <div class="container-fluid">
+            <a class="navbar-brand d-flex align-items-center" href="/">
+                <i class="fa-solid fa-arrow-left me-2 small text-secondary" title="Back to Dashboard"></i>
+                CML <span>MONITOR</span>
+            </a>
+
+            <div class="d-flex align-items-center">
+                <div class="nav-item dropdown user-dropdown-hover">
+                    <div class="d-flex align-items-center user-dropdown-trigger" style="cursor: pointer;" data-bs-toggle="dropdown">
+                        <div class="bg-primary text-white rounded-circle d-flex justify-content-center align-items-center me-2" style="width: 36px; height: 36px; font-weight: 600; font-size: 16px;">
+                            {{ user.username[:1]|upper }}
+                        </div>
+                        <span class="text-dark fw-semibold">{{ user.username }}</span>
+                        <i class="fa-solid fa-chevron-down ms-2 small text-muted"></i>
+                    </div>
+
+                    <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0 mt-2">
+                        <li class="px-3 py-2 border-bottom user-details-box">
+                            <div class="fw-bold text-dark">{{ user.fullname }}</div>
+                            <div class="text-muted small"><i class="fa-solid fa-user me-1"></i>{{ user.username }}</div>
+                            <div class="text-muted small"><i class="fa-solid fa-envelope me-1"></i>{{ user.mail }}</div>
+                        </li>
+                        <li>
+                            <a class="dropdown-item text-danger d-flex align-items-center mt-1" href="/logout">
+                                <i class="fa-solid fa-right-from-bracket me-2"></i> Logout
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid main-content-area">
+        <div class="row">
+            
+            <nav class="col-md-3 col-lg-2 d-md-block sidebar py-4">
+                <div class="position-sticky">
+                    <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-2 mb-3 text-muted text-uppercase">
+                        <span>Settings Menu</span>
+                    </h6>
+                    <ul class="nav flex-column nav-pills px-2" id="config-tabs" role="tablist">
+                        <li class="nav-item mb-1" role="presentation">
+                            <button class="nav-link {% if active_tab == 'ldap' %}active{% endif %} w-100 text-start d-flex align-items-center" id="ldap-tab" data-bs-toggle="pill" data-bs-target="#ldap" type="button" role="tab" aria-controls="ldap" aria-selected="{{ 'true' if active_tab == 'ldap' else 'false' }}">
+                                <i class="fa-solid fa-users-gear me-3" style="width: 20px;"></i> LDAP
+                            </button>
+                        </li>
+                        <li class="nav-item mb-1" role="presentation">
+                            <button class="nav-link {% if active_tab == 'cml' %}active{% endif %} w-100 text-start d-flex align-items-center" id="cml-tab" data-bs-toggle="pill" data-bs-target="#cml" type="button" role="tab" aria-controls="cml" aria-selected="{{ 'true' if active_tab == 'cml' else 'false' }}">
+                                <i class="fa-solid fa-server me-3" style="width: 20px;"></i> CML
+                            </button>
+                        </li>
+                        <li class="nav-item mb-1" role="presentation">
+                            <button class="nav-link {% if active_tab == 'alerts' %}active{% endif %} w-100 text-start d-flex align-items-center" id="alerts-tab" data-bs-toggle="pill" data-bs-target="#alerts" type="button" role="tab" aria-controls="alerts" aria-selected="{{ 'true' if active_tab == 'alerts' else 'false' }}">
+                                <i class="fa-solid fa-bell me-3" style="width: 20px;"></i> Alerts
+                            </button>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+
+            <main class="col-md-9 ms-sm-auto col-lg-10 px-md-5 py-4">
+                <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-4 border-bottom">
+                    <h2 class="h3">System Configuration</h2>
+                    </div>
+
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }} alert-dismissible fade show mb-4" role="alert">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+                <div class="tab-content" id="config-tabContent">
+                    
+                    <div class="tab-pane fade {% if active_tab == 'ldap' %}show active{% endif %}" id="ldap" role="tabpanel" aria-labelledby="ldap-tab" tabindex="0">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body p-4">
+                                <h4 class="card-title mb-4">LDAP Configuration</h4>
+                                <form method="POST" action="{{ url_for('update_ldap') }}">
+                                    <div class="row mb-3">
+                                        <div class="col-md-12 mb-3">
+                                            <div class="form-check form-switch">
+                                                <input class="form-check-input" type="checkbox" role="switch" id="ldapEnabled" name="ldap_enabled" value="1" {% if configs.get('ldap.enabled', '0') == '1' %}checked{% endif %}>
+                                                <label class="form-check-label fw-semibold" for="ldapEnabled">Enable LDAP</label>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-semibold">Server URL</label>
+                                            <input type="text" name="server" class="form-control" value="{{ configs.get('ldap.server', '') }}" placeholder="ldap://ad.example.com">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-semibold">Server Port</label>
+                                            <input type="number" name="port" class="form-control" value="{{ configs.get('ldap.port', '') }}" placeholder="389">
+                                        </div>
+                                    </div>
+
+                                    <div class="row mb-4">
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-semibold">Base DN</label>
+                                            <input type="text" name="base_dn" class="form-control" value="{{ configs.get('ldap.base_dn', '') }}" placeholder="dc=example,dc=com">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-semibold">Bind User DN</label>
+                                            <input type="text" name="bind_dn" class="form-control" value="{{ configs.get('ldap.bind_dn', '') }}" placeholder="cn=admin,dc=example,dc=com">
+                                        </div>
+                                    </div>
+
+                                    <div class="row mb-4">
+                                        <div class="col-md-12">
+                                            <label class="form-label fw-semibold">Bind User Password</label>
+                                            <input type="password" name="bind_password" class="form-control" placeholder="••••••••">
+                                        </div>
+                                    </div>
+
+                                    <div id="ldap-test-alert" class="alert d-none mt-3"></div>
+                                    <div class="d-flex gap-2 align-items-center">
+                                        <button type="submit" class="btn btn-primary">Save LDAP Settings</button>
+                                        <button type="button" class="btn btn-outline-info" id="btn-test-ldap" onclick="testLDAPConfig()">Test Connection</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane fade {% if active_tab == 'cml' %}show active{% endif %}" id="cml" role="tabpanel" aria-labelledby="cml-tab" tabindex="0">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body p-4">
+                                <h4 class="card-title mb-4">CML Environment Setup</h4>
+                                <form method="POST" action="{{ url_for('update_cml') }}" enctype="multipart/form-data">
+                                    <div class="mb-3">
+                                        <label class="form-label fw-semibold">API Endpoint</label>
+                                        <input type="text" class="form-control" name="workspace_domain" value="{{ configs.get('cml.workspace_domain', '') }}" placeholder="https://cml.ecsprod.example.com" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-semibold">Admin API Key</label>
+                                        <input type="password" class="form-control" name="api_key" value="{{ configs.get('cml.api_key', '') }}" placeholder="Your CML Admin API Key" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-semibold">User Namespace Prefix</label>
+                                        <input type="text" class="form-control" name="namespace_prefix" value="{{ configs.get('cml.namespace_prefix', '') }}" placeholder="cmlprod-user-" required>
+                                    </div>
+                                    
+                                    <div class="mb-4">
+                                        <label class="form-label fw-semibold">Kubeconfig File (rke2.yaml) <span class="text-muted fw-normal fs-6">(Optional)</span></label>
+                                        <input type="file" name="kubeconfig_file" accept=".yaml,.yml" class="form-control">
+                                        <div class="form-text small">
+                                            Found on any ECS Master Server at <strong>/etc/rancher/rke2/rke2.yaml</strong>. 
+                                            Replace <code>127.0.0.1</code> with the server's public IP 
+                                            <a href="/static/images/rke2_edit_example.png" target="_blank" rel="noopener noreferrer">(view example <i class="fa-solid fa-arrow-up-right-from-square ms-1" style="font-size: 0.8em;"></i>)</a>.
+                                            <br><span class="text-primary fw-medium">Leave blank to keep the existing configuration.</span>
+                                        </div>
+                                    </div>
+
+                                    <div id="cml-test-alert" class="alert d-none mt-3"></div>
+                                    <div class="d-flex gap-2">
+                                        <button type="submit" class="btn btn-primary">Save CML Settings</button>
+                                        <button type="button" class="btn btn-outline-info" id="btn-test-cml" onclick="testCMLConfig()">Test Connection</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane fade {% if active_tab == 'alerts' %}show active{% endif %}" id="alerts" role="tabpanel" aria-labelledby="alerts-tab" tabindex="0">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body p-4">
+                                <h4 class="card-title mb-4">Alerts Configuration</h4>
+                                <form method="POST" action="{{ url_for('update_alerts') }}">
+
+                                    <h6 class="text-primary border-bottom pb-2 mb-3 mt-2">General Settings</h6>
+                                    <div class="row mb-3">
+                                        <div class="col-md-12 mb-3">
+                                            <div class="form-check form-switch">
+                                                <input class="form-check-input" type="checkbox" role="switch" id="alertEnabled" name="alert_enabled" value="1" {% if configs.get('alert.enabled', '0') == '1' %}checked{% endif %}>
+                                                <label class="form-check-label fw-semibold" for="alertEnabled">Enable Alerts System</label>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-semibold">Alert Cron Schedule</label>
+                                            <input id="alertCronInput" type="text" class="form-control" name="alert_cron" value="{{ configs.get('alert.runtime.alert_cron', '') }}" placeholder="0 10 * * 0-4">
+                                            <div class="form-text small">Leave empty to disable alert emails</div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-semibold">Report Cron Schedule</label>
+                                            <input id="reportCronInput" type="text" class="form-control" name="report_cron" value="{{ configs.get('alert.runtime.report_cron', '') }}" placeholder="0 16 * * 0-4">
+                                            <div class="form-text small">Leave empty to disable report emails</div>
+                                        </div>
+                                    </div>
+
+                                    <h6 class="text-primary border-bottom pb-2 mt-4 mb-3">SMTP Setup</h6>
+                                    <div class="row mb-3">
+                                        <div class="col-md-8">
+                                            <label class="form-label fw-semibold">SMTP Server</label>
+                                            <input type="text" class="form-control" name="smtp_server" value="{{ configs.get('alert.smtp.server', '') }}" placeholder="smtp.example.com">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label fw-semibold">Port</label>
+                                            <input type="number" class="form-control" name="smtp_port" value="{{ configs.get('alert.smtp.port', '') }}" placeholder="587">
+                                        </div>
+                                    </div>
+                                    <div class="row mb-3">
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-semibold">SMTP Username</label>
+                                            <input type="text" class="form-control" name="smtp_user" value="{{ configs.get('alert.smtp.user', '') }}" placeholder="Username">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-semibold">SMTP Password</label>
+                                            <input id="SMTPUserPassword" type="password" class="form-control" name="smtp_password" value="{{ configs.get('alert.smtp.password', '') }}" placeholder="••••••••">
+                                        </div>
+                                    </div>
+                                    <div class="row mb-3">
+                                        <div class="col-md-12">
+                                            <div class="form-check form-switch">
+                                                <input class="form-check-input" type="checkbox" role="switch" id="useTls" name="use_tls" value="1" {% if configs.get('alert.smtp.use_tls', '0') == '1' %}checked{% endif %}>
+                                                <label class="form-check-label fw-semibold" for="useTls">SMTP Use TLS</label>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <h6 class="text-primary border-bottom pb-2 mt-4 mb-3">Email Routing & Formatting</h6>
+                                    <div class="row mb-3">
+                                        <div class="col-md-12">
+                                            <label class="form-label fw-semibold">Sender Email Address</label>
+                                            <input type="email" class="form-control" name="sender_email" value="{{ configs.get('alert.smtp.sender_email', '') }}" placeholder="alerts@example.com">
+                                        </div>
+                                    </div>
+                                    <div class="row mb-3">
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-semibold">Alert Email Subject Line</label>
+                                            <input type="text" class="form-control" name="alert_subject" value="{{ configs.get('alert.smtp.alert_subject', '') }}" placeholder="ML Workbench Zombie Sessions Alert">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-semibold">Report Email Subject Line</label>
+                                            <input type="text" class="form-control" name="report_subject" value="{{ configs.get('alert.smtp.report_subject', '') }}" placeholder="ML Workbench Workload Report">
+                                        </div>
+                                    </div>
+                                    <div class="row mb-4">
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-semibold">Alert Recipients</label>
+                                            <input type="text" class="form-control" name="alert_recipient_emails" value="{{ configs.get('alert_emails', '') }}" placeholder='user1@example.com,user2@example.com'>
+                                            <div class="form-text small">a comma-separated list</div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-semibold">Report Recipients</label>
+                                            <input type="text" class="form-control" name="report_recipient_emails" value="{{ configs.get('report_emails', '') }}" placeholder='user1@example.com,user2@example.com'>
+                                            <div class="form-text small">a comma-separated list</div>
+                                        </div>
+                                    </div>
+
+                                    <div id="smtp-test-alert" class="alert d-none mt-3"></div>
+                                    <div class="d-flex gap-2">
+                                        <button type="submit" class="btn btn-primary">Save Alerts Settings</button>
+                                        <button type="button" class="btn btn-outline-info" id="btn-test-smtp" onclick="testSMTPConfig()">Send Test Email</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="static/js/bootstrap5.3.0.bundle.min.js"></script>
+    <script src="static/js/config.js"></script>
+</body>
+</html>

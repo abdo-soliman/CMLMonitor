@@ -1,0 +1,41 @@
+/* Sidebar styling to span full height below navbar */
+.sidebar {
+    height: calc(100vh - 65px); /* Adjust based on your navbar height */
+    position: sticky;
+    /* top: 65px; */
+    overflow-y: auto;
+    border-right: 1px solid #dee2e6;
+    background-color: #f8f9fa;
+}
+
+.main-content-area {
+    padding-top: 57px; /* Offset for the fixed top navbar */
+}
+
+/* Custom nav pill styling for the sidebar */
+.nav-pills .nav-link {
+    color: #495057;
+    border-radius: 0.375rem;
+    padding: 0.75rem 1rem;
+    transition: all 0.2s ease-in-out;
+}
+.nav-pills .nav-link:hover {
+    background-color: #e9ecef;
+}
+.nav-pills .nav-link.active {
+    background-color: #0d6efd;
+    color: #fff;
+}
+
+.navbar-brand {
+    display: flex;
+    align-items: center;
+    color: #007bff !important;
+    font-size: 1.4rem;
+    font-family: 'Montserrat', sans-serif;
+}
+
+.navbar-brand span {
+    color: black !important;
+    padding-left: 5px;
+}

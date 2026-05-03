@@ -1,0 +1,293 @@
+/* Custom styles to match the Airflow UI */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f8f9fa;
+    color: #333;
+}
+
+/* Header styles */
+.navbar {
+    background-color: #fff;
+    border-bottom: 1px solid #e7e7e7;
+    padding: 0.5rem 1rem;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+.navbar-brand {
+    display: flex;
+    align-items: center;
+    color: #007bff !important;
+    font-size: 1.4rem;
+    font-family: 'Montserrat', sans-serif;
+}
+
+.navbar-brand span {
+    color: black !important;
+    padding-left: 5px;
+}
+
+.navbar-nav .nav-link {
+    color: #555;
+    font-weight: 500;
+    padding: 0.5rem 1rem;
+    margin-right: 5px;
+}
+.navbar-nav .nav-link:hover, .navbar-nav .nav-link.active {
+    color: #007bff;
+}
+
+/* Main content styles */
+.main-content {
+    padding: 25px;
+    margin-top: 56px; /* Height of the fixed navbar */
+}
+h2 {
+    font-weight: 400;
+    margin-bottom: 25px;
+    color: #333;
+}
+
+/* Ensure the dropdown matches the search input style */
+select.search-input {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23343a40' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 16px 12px;
+    appearance: none; /* Removes default arrow to use the custom one */
+}
+
+select.search-input:focus {
+    border-color: #007bff;
+    box-shadow: none;
+    background-color: #fff;
+}
+
+/* Controls area (filters, search) */
+.controls-area {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 25px;
+    background-color: #fff;
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.btn-group .btn {
+    border: 1px solid #ced4da;
+    background-color: #fff;
+    color: #555;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 6px 12px;
+}
+.btn-group .btn:hover {
+    background-color: #f8f9fa;
+}
+.btn-group .btn.active {
+    background-color: #007bff;
+    color: #fff;
+    border-color: #007bff;
+}
+.btn-group .badge {
+    font-weight: normal;
+    border-radius: 10px;
+    padding: 3px 7px;
+    font-size: 11px;
+}
+.btn-group .btn.active .badge {
+    background-color: rgba(255,255,255,0.2) !important;
+    color: #fff !important;
+}
+.search-input {
+    border-radius: 20px;
+    background-color: #f8f9fa;
+    border: 1px solid #ced4da;
+    padding: 6px 15px;
+    font-size: 14px;
+}
+.search-input:focus {
+    background-color: #fff;
+    box-shadow: none;
+    border-color: #007bff;
+}
+
+/* Workload Table styles */
+.table-container {
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
+.table {
+    margin-bottom: 0;
+    font-size: 14px;
+}
+.table thead th {
+    border-bottom: 2px solid #dee2e6;
+    font-weight: 600;
+    color: #555;
+    vertical-align: middle;
+    padding: 15px;
+    white-space: nowrap;
+    background-color: #f8f9fa;
+}
+.table td {
+    vertical-align: middle;
+    padding: 15px;
+    border-top: 1px solid #f1f1f1;
+}
+.table-hover tbody tr:hover {
+    background-color: #f9fbff;
+}
+
+/* Gives sub-workloads a distinct background color */
+.sub-workload-row {
+    background-color: #f8f9fa; /* Bootstrap's light gray */
+}
+
+/* Ensure hover effect doesn't break the distinct color too much */
+.table-hover > tbody > tr.sub-workload-row:hover > * {
+    background-color: #e9ecef; 
+    color: inherit;
+}
+
+.badge-id {
+    font-family: monospace;
+    background-color: #eeeeee;
+    padding: 2px 5px;
+    font-size: 12px;
+    border-radius: 4px;
+}
+
+/* Schedule badge */
+.badge-schedule {
+    background-color: #e2e6ea;
+    color: #333;
+    font-family: monospace;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+}
+.badge-schedule-running {
+    background-color: #def7ec;
+    color: #03543f;
+}
+
+.actions-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.btn-delete {
+    color: #fff;
+    padding: 5px;
+    border-color: transparent;
+    border-radius: 5px;
+    background: #dc3545;
+}
+.btn-delete:hover {
+    color: #bd2130;
+    background-color: #fde8e8;
+}
+/* Pagination Styling */
+.pagination-container {
+    background-color: #f8f9fa;
+}
+.pagination-container select.search-input {
+    padding-top: 2px;
+    padding-bottom: 2px;
+    background-position: right 0.4rem center; /* Adjusted for smaller width */
+}
+.pagination .page-link {
+    color: #007bff;
+    border-color: #dee2e6;
+    padding: 5px 12px;
+}
+.pagination .page-item.active .page-link {
+    background-color: #007bff;
+    border-color: #007bff;
+    color: #fff;
+}
+.pagination .page-item.disabled .page-link {
+    color: #6c757d;
+    background-color: #fff;
+}
+.pagination .page-link:hover {
+    background-color: #e2e6ea;
+    border-color: #dee2e6;
+    color: #0056b3;
+}
+
+/* user details/logout dropdown */
+/* Ensures the dropdown expands to fit the content perfectly */
+.user-dropdown-hover .dropdown-menu {
+    min-width: max-content; /* Forces the container to be as wide as the longest text */
+    padding-top: 12px; /* Adds the requested padding to the top of the dropdown */
+
+    right: 0 !important;   /* Anchors the menu to the right side of the profile icon */
+    left: auto !important; /* Forces it to ignore left-side anchoring */
+    margin-right: 15px;
+}
+
+/* Triggers the dropdown to open when hovering */
+.user-dropdown-hover:hover .dropdown-menu {
+    display: block;
+    margin-top: 0; 
+}
+
+/* Updated styling for the user details box */
+.user-details-box {
+    background-color: #f8f9fa;
+    white-space: nowrap; /* Strictly prevents the name or email from wrapping */
+    border-radius: 4px 4px 0 0;
+    /* Note: If you used margin-top: -8px from the previous code, remove it so your new top padding works correctly */
+}
+
+/* Adds a pointer cursor and a slight fade effect when hovering over the username/avatar */
+.user-dropdown-trigger {
+    cursor: pointer;
+    transition: opacity 0.2s ease-in-out;
+    padding: 5px 0; 
+}
+
+.user-dropdown-trigger:hover {
+    opacity: 0.8;
+}
+
+.dropdown-item:hover {
+    background-color: #fee2e2; 
+}
+
+.app-footer {
+    background-color: #fff;
+    border-top: 1px solid #e7e7e7;
+    padding: 15px 25px;
+    margin-top: 40px;
+    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.footer-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.app-version {
+    color: #555;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.github-link {
+    color: #555;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    transition: color 0.2s ease-in-out;
+}
+
+.github-link i {
+    font-size: 18px;
+    margin-right: 6px;
+}

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Admin - CMLMonitor</title>
+    <link rel="stylesheet" href="static/css/bootstrap5.3.0.min.css">
+    <link rel="stylesheet" href="static/css/all6.4.0.min.css">
+    <link rel="stylesheet" href="static/css/setup.css">
+</head>
+
+<body>
+    <div class="setup-card active">
+        <div class="card-header-custom">
+            <div class="brand-title mb-3">CML <span>MONITOR</span></div>
+            <div class="step-indicator mb-2">Welcome</div>
+            <h3 class="mb-1">Create Admin Account</h3>
+            <p class="text-muted">Initialize the database and set up the primary system administrator.</p>
+        </div>
+        <div class="card-body-custom">
+            <div id="admin-alert" class="alert d-none"></div>
+            
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Username *</label>
+                <input type="text" id="admin_username" class="form-control" placeholder="admin" required>
+            </div>
+            
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Full Name *</label>
+                    <input type="text" id="admin_fullname" class="form-control" placeholder="System Administrator" required>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Email Address *</label>
+                    <input type="email" id="admin_email" class="form-control" placeholder="admin@example.com" required>
+                </div>
+            </div>
+
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Password *</label>
+                    <input type="password" id="admin_password" class="form-control" placeholder="••••••••" required>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Confirm Password *</label>
+                    <input type="password" id="admin_confirm_password" class="form-control" placeholder="••••••••" required>
+                </div>
+            </div>
+        </div>
+        <div class="card-footer-custom">
+            <div></div> <button class="btn btn-primary px-4" id="btn-create-admin" onclick="createAdmin()">
+                Initialize System <i class="fa-solid fa-power-off ms-2"></i>
+            </button>
+        </div>
+    </div>
+
+    <script src="static/js/bootstrap5.3.0.bundle.min.js"></script>
+    <script src="static/js/setup_admin.js"></script>
+</body>
+</html>

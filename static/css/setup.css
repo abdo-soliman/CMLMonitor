@@ -1,0 +1,74 @@
+body {
+    background-color: #f0f4f9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 20px;
+}
+
+.setup-card {
+    width: 100%;
+    max-width: 650px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    border-top: 8px solid #007bff;
+    display: none;
+    /* Hidden by default, managed by JS */
+}
+
+.setup-card.active {
+    display: block;
+    animation: fadeIn 0.4s;
+}
+
+.card-header-custom {
+    padding: 30px 40px 10px;
+    border-bottom: 1px solid #eee;
+}
+
+.card-body-custom {
+    padding: 30px 40px;
+}
+
+.card-footer-custom {
+    padding: 20px 40px;
+    background-color: #f8f9fa;
+    border-top: 1px solid #eee;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.brand-title {
+    font-size: 1.8rem;
+    font-family: 'Montserrat', sans-serif;
+    font-weight: bold;
+    color: #007bff;
+}
+
+.brand-title span {
+    color: black;
+}
+
+.step-indicator {
+    font-size: 0.9rem;
+    color: #6c757d;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
