@@ -55,6 +55,15 @@ EMAIL_TEMPLATES_PATH = "mail_templates"
 
 
 def check_cml_connection(workspace_domain: str, api_key: str):
+    """
+    Attempts to list workload types via CML API, if successful
+    then provided workspace_domain, api_key are valid
+
+    Params: workspace_domain -> str, URL for CML
+            api_key -> str, API_KEY for user on CML
+    Returns: cml_connected -> bool, True if connection is established successfully.
+             message -> str or None, None if successsful otherwise error message.
+    """
     try:
         client = cmlapi.default_client(workspace_domain, api_key)
         api_response = client.list_workload_types_with_http_info()
@@ -71,6 +80,10 @@ def is_cml_apikey_admin(workspace_domain: str, api_key: str) -> bool:
     Checks if a CML API key belongs to an administrator.
     Relies on intentionally triggering a 400 Bad Request on an admin-only
     endpoint to verify authorization without actually creating resources.
+
+    Params: workspace_domain -> str, URL for CML
+            api_key -> str, API_KEY for admin user on CML
+    Returns: is_cml_admin -> bool, True if provided api_key is for an admin account on CML
     """
     try:
         client = cmlapi.default_client(workspace_domain, api_key)
@@ -90,6 +103,14 @@ def is_cml_apikey_admin(workspace_domain: str, api_key: str) -> bool:
 
 
 def test_kube_config(kube_config_file_path):
+    """
+    Checks connection to kubernetes cluster can be established via rke2.yaml config file.
+    Attempts to list namespaces using provided rke2.yaml if successful the file is valid
+
+    Params: kube_config_file_path -> str URL for CML
+    Returns: kube_config_valid -> bool, True if provided config_file is a valid rke2.yaml
+             message -> str, test connection result message
+    """
     try:
         # Load the configuration from the temporary file
         config.load_kube_config(config_file=kube_config_file_path)
@@ -503,7 +524,7 @@ def set_configs():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog="CML Monitor",
-        description="A Program to monitor Zombie sessions running on Kubernetes"
+        description="A Program to monitor workload running on CML"
     )
 
     parser.add_argument("-m", "--mode", type=str, choices=["alert", "report"], default="alert", help="--mode <alert,report>")

@@ -14,13 +14,24 @@ db.init_app(app)
 
 
 def is_ldap_enabled():
-    """Dynamically checks if LDAP is enabled in the database."""
+    """
+    Checks if LDAP is enabled in the database.
+
+    Params:
+    Returns: ldap_enabled -> bool, True if ldap.enabled is set to '1' in the configs table
+    """
     with app.app_context():
         ldap_config = Config.query.filter_by(attr='ldap.enabled').first()
         return ldap_config and ldap_config.value.strip() == '1'
 
 
 def get_ldap_configs():
+    """
+    Get LDAP configurations from database.
+
+    Params:
+    Returns: ldap_configs -> dict, LDAP configuration from configs table
+    """
     with app.app_context():
         ldap_configs = Config.query.filter(Config.attr.like('ldap.%')).all()
         configs = {config.attr: config.value for config in ldap_configs}
@@ -35,6 +46,17 @@ def get_ldap_configs():
 
 
 def validate_ldap_search(server_url: str, port: int, base_dn: str, bind_dn: str, bind_pass: str, test_username: str):
+    """
+    Test LDAP Connection by doing an LDAP search on a username provided by user
+
+    Params: server_url -> str
+            port -> int
+            base_dn -> str
+            bind_pass -> str
+            test_username -> str
+    Returns: ldap_test_successful -> bool, True if connection to LDAP server is successfully established
+             message -> str, test connection result message
+    """
     try:
         # 1. Connect and Bind to the LDAP Server
         server = Server(server_url, port=port, get_info=ALL)
@@ -66,6 +88,11 @@ def validate_ldap_search(server_url: str, port: int, base_dn: str, bind_dn: str,
 def authenticate_and_user_data(username, password):
     """
     Authenticates a user against AD using uid (or sAMAccountName) and returns their data.
+    If Authenticated Return User data, if failed return None
+
+    Params: username -> str
+            password -> str
+    Returns: user_data -> dict or None, user_data dict = { 'uid': sAMAccountName, '', 'mail': mail, 'displayName': displayName }
     """
     configs = get_ldap_configs()
 
@@ -118,10 +145,10 @@ def authenticate_and_user_data(username, password):
 
 def get_user_full_name(username):
     """
-    Fetch first and last name of an AD user by username (sAMAccountName)
+    Fetch User displayName from username
 
-    :param username: AD username (sAMAccountName)
-    :return: tuple (first_name, last_name) or (None, None) if not found
+    Params: username -> str, AD username (sAMAccountName)
+    Returns: display_name -> str or None
     """
     configs = get_ldap_configs()
 

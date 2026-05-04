@@ -104,11 +104,6 @@ def export_configs_to_csv(filename):
 
 
 def get_configs():
-    """
-    Queries the database for Config entries and returns them as a 
-    nested dictionary with specific data types applied.
-    """
-
     # 1. Define the mapping: DB Attribute -> (Section, Dictionary Key, Cast Function)
     schema_mapping = {
         # SMTP
@@ -269,7 +264,10 @@ def export_users_to_csv(filename):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Manage local users and database migrations.")
+    parser = argparse.ArgumentParser(
+        prog="CML Monitor DB Utils",
+        description="Manage CML Monitor Database"
+    )
     subparsers = parser.add_subparsers(title="commands", dest="command", required=True)
 
     # --- CONFIGS SUBPARSERS ---

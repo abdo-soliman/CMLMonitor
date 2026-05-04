@@ -32,6 +32,13 @@ class OrderByFilters(str, Enum):
 
 
 def validate_config_file(file_path):
+    """
+    Checks if file exists and is readable
+    Throws an exception if file doesn't exist or not readable
+
+    Params: file_path -> str
+    Returns: 
+    """
     if not os.path.isfile(file_path):
         raise FileNotFoundError(f"{file_path} does not exist or is not a file")
 
@@ -40,13 +47,23 @@ def validate_config_file(file_path):
 
 
 def is_none_or_empty(variable):
-    if variable is None or variable == "":
-        return True
+    """
+    Checks if passed variable is None or empty string
 
-    return False
+    Params: variable -> any
+    Returns: True, if passed variable is None or empty string.
+    """
+    return variable is None or variable == ""
 
 
 def validate_none_or_empty(variable):
+    """
+    Checks if None or Empty Raise Value Error Exception or return the variable
+
+    Params: variable -> any
+    Returns: variable -> any, the same variable passed if it's None or empty string.
+    """
+
     if variable is None:
         raise ValueError("All Config variables must be avialable with correct vaules")
 
@@ -57,10 +74,22 @@ def validate_none_or_empty(variable):
 
 
 def safe_str(val):
+    """
+    Cast passed val to string if not None or empty string
+
+    Params: val -> any
+    Returns: val -> str, passed value casted to string.
+    """
     return str(val) if val is not None else ""
 
 
 def safe_int(val):
+    """
+    Cast passed val to integer or return None
+
+    Params: val -> any
+    Returns: val -> int, passed value casted to integer.
+    """
     try:
         return int(val)
     except (ValueError, TypeError):
@@ -68,11 +97,24 @@ def safe_int(val):
 
 
 def safe_bool(val):
+    """
+    Cast passed val to boolean or return None
+
+    Params: val -> any
+    Returns: val -> bool, passed value casted to integer.
+    """
     # Database stores '1' or '0', but this also catches 'true' just in case
     return str(val).strip().lower() in ['1', 'true', 'yes']
 
 
 def split_age(age):
+    """
+    takes an age string [0-9]d[0-9]h[0-9]m[0-9]s converts it to a dictionary
+    of parts and their values
+
+    Params: age -> str
+    Returns: age_dict -> dict, {'d': days, 'h': hours, 'm': minutes, 's': seconds }
+    """
     matches = re.findall(r"(\d+)([dhms])", age)
     # Convert to dictionary
     age_dict = {letter: int(number) for number, letter in matches}
@@ -97,11 +139,24 @@ def split_age(age):
 
 
 def age_toseconds(age_dict):
+    """
+    takes an age_dict {'d': days, 'h': hours, 'm': minutes, 's': seconds }
+    converts it to seconds
+
+    Params: age_dict -> dict, {'d': days, 'h': hours, 'm': minutes, 's': seconds }
+    Returns: age_seconds -> int
+    """
     # day to seconds 24*60*60=86400, hours to seconds 60*60=3600
     return (age_dict["d"] * 86400) + (age_dict["h"] * 3600) + (age_dict["m"] * 60) + age_dict["s"]
 
 
 def seconds_to_age(seconds):
+    """
+    takes an age as seconds and create age dict from it
+
+    Params: seconds -> int
+    Returns: age_dict -> dict, {'d': days, 'h': hours, 'm': minutes, 's': seconds }
+    """
     age_dict = { "d": 0, "h": 0, "m": 0, "s": 0 }
     
     age_dict["s"] = seconds % 60
@@ -117,6 +172,13 @@ def seconds_to_age(seconds):
 
 
 def age_dict_tostring(age_dict):
+    """
+    takes an age_dict {'d': days, 'h': hours, 'm': minutes, 's': seconds }
+    concatenates it into age string [0-9]d[0-9]h[0-9]m[0-9]s
+
+    Params: age_dict -> dict, {'d': days, 'h': hours, 'm': minutes, 's': seconds }
+    Returns: age -> str, [0-9]d[0-9]h[0-9]m[0-9]s
+    """
     age_string = ""
 
     age_string = age_string + f"{age_dict['d']}d" if age_dict["d"] > 0 else age_string
@@ -128,6 +190,14 @@ def age_dict_tostring(age_dict):
 
 
 def keep_only_arabic(string):
+    """
+    takes a string checks if it has arabic letters
+    if true remove extra white spaces
+
+    Params: string -> str
+    Returns: string -> str, string with extra white spaces removed
+             has_arabic -> bool, True if string has arabic letters
+    """
     # if no string provided return None
     if string is None:
         return None, False
@@ -148,6 +218,19 @@ def keep_only_arabic(string):
 
 
 def pagination_to_indecies(page_size, page_number, total_size):
+    """
+    calculates pagination indcies from page_size, page_number, total_array_size
+
+    Params: page_size -> int
+            page_number -> int
+            total_size -> int
+    Returns: start_index -> int
+             end_index -> int
+             page_number -> int
+             page_size -> int
+             maximum_number_of_pages -> int
+    """
+
     page_size = page_size if page_size in [25, 50, 100] else 25
 
     max_number_of_pages = int(total_size / page_size)

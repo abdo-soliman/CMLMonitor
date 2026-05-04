@@ -42,7 +42,9 @@ workload_manager = None
 
 
 def init_workload_manager():
-    """Helper function to instantiate and start the global workload manager."""
+    """
+    Helper function to instantiate and start the global workload manager.
+    """
     global workload_manager
     if workload_manager is None:
         # Import here if needed to avoid circular imports, or assume it's imported at the top
@@ -52,11 +54,17 @@ def init_workload_manager():
 
 
 def is_cml_configed():
+    """
+    Checks if CML Configurations are set in the configs table
+
+    Params:
+    Returns: cml_configured -> boolean, True if all CML configurations are not none or empty strings
+    """
     with app.app_context():
         cml_configs = Config.query.filter(Config.attr.like('cml.%')).all()
         configs = {config.attr: config.value for config in cml_configs}
 
-        return not (is_none_or_empty(configs['cml.workspace_domain']) or is_none_or_empty(configs['cml.api_key']) or is_none_or_empty(configs['cml.namespace_prefix']))
+        return not (is_none_or_empty(configs['cml.workspace_domain']) or is_none_or_empty(configs['cml.api_key']) or is_none_or_empty(configs['cml.namespace_prefix']) or is_none_or_empty(configs['cml.kubeconfig_path']))
 
 
 # Create tables and initialize workload/alert processes before running
@@ -90,8 +98,7 @@ with app.app_context():
 
 def sync_alert_processes(app):
     """
-    Runs the synchronization logic inside an application context.
-    We pass 'app' so the database queries work inside the new thread.
+    Runs when ever the configs table is updated to manage Alert background processes
     """
     with app.app_context():
         try:
@@ -154,8 +161,6 @@ def page_not_found(e):
 
 @app.before_request
 def enforce_access_policies():
-    """Runs before every request to enforce global security and state policies."""
-    
     # Allow safe routing during the absolute initial setup phase
     allowed_admin_setup = ['setup_admin_page', 'create_admin', 'static']
     
