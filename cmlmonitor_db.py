@@ -13,11 +13,6 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 
 
-# Create tables before first request
-with app.app_context():
-    db.create_all()
-
-
 def init_configs(username):
     with app.app_context():
         # 1. Verify the user exists to satisfy the Foreign Key constraint
@@ -25,7 +20,7 @@ def init_configs(username):
         if user is None:
             print(f"[-] Error: User '{username}' does not exist. Cannot set 'updated_by'.")
             return
-        
+
         if not user.config_admin:
             print(f"[-] Error: User '{username}' is not allowed to manage CML Monitor configurations.")
             return

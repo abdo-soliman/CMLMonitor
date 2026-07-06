@@ -12,6 +12,7 @@ import process_manager
 from extensions import db
 from sqlalchemy import event
 from models import User, Config
+from flask_migrate import Migrate
 from pydantic import ValidationError
 from cmlmonitor_db import init_configs
 from smtp_utils import smtp_test_email
@@ -33,6 +34,10 @@ app.secret_key = 'super_secret_key'  # Change this in production
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///cmlmonitor.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
+
+# Add this line to link migrations to your app and db
+migrate = Migrate(app, db, render_as_batch=True) 
+# Note: render_as_batch=True is highly recommended for SQLite!
 
 # --- Flask-Login Initialization ---
 login_manager = LoginManager()
@@ -69,7 +74,6 @@ def is_cml_configed():
 
 # Create tables and initialize workload/alert processes before running
 with app.app_context():
-    db.create_all()
     try:
         init_config = Config.query.filter_by(attr='init').first()
         # 2. If setup is already complete, start the manager immediately
