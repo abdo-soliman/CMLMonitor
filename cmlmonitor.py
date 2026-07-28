@@ -281,6 +281,8 @@ def workload_report():
         search_data[SearchFilters.AGE.value].add(workload["age"])
         search_data[SearchFilters.RESOURCES.value].add(workload["Resource Profile"])
 
+    search_data = {k: list(v) for k, v in search_data.items()}
+
     return workloads, search_data
 
 

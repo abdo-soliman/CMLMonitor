@@ -1,8 +1,9 @@
 import logging
-import threading
+import json
+import redis
+import os
 from cmlmonitor import workload_report
 from utils import WorkloadType, SearchFilters, OrderByFilters
-
 
 logging.basicConfig(
     level=logging.INFO,
@@ -11,28 +12,31 @@ logging.basicConfig(
 )
 
 class WorkloadManager():
-    def __init__(self, periodic_update_interval_sec):
-        self.workload = None
-        self.search_data = None
-        self.interval = periodic_update_interval_sec
-        self.thread = None
+    def __init__(self):
+        # Initialize Valkey (Redis) Connection
+        # decode_responses=True ensures we get Python strings back instead of bytes
+        valkey_host = os.getenv("VALKEY_HOST", "localhost")
+        valkey_port = int(os.getenv("VALKEY_PORT", 6379))
+        self.valkey = redis.Redis(host=valkey_host, port=valkey_port, db=0, decode_responses=True)
 
-    def start_caching(self):
-        """The main async loop. Runs periodically or when triggered."""
-        logging.info("Updating Workload")
-        self.workload, self.search_data = workload_report()
-        self.group_workload_by_id() # some sub tasks are listed as seperate tasks we group all tasks with the same id
-        logging.info("Workload updated")
-        self.thread = threading.Timer(self.interval, self.start_caching)
-        self.thread.start()
+    def fetch_and_cache(self):
+        """Fetches data from CML API, processes it, and caches it in Valkey."""
+        logging.info("Fetching workload data from CML API...")
+        try:
+            raw_workloads, search_data = workload_report()
+            grouped_workloads = self.group_workload_by_id(raw_workloads)
 
-    def stop_caching(self):
-        """Gracefully stops the background loop."""
-        if self.thread:
-            self.thread.cancel()
+            # Store in Valkey using JSON serialization
+            self.valkey.set("cml_workloads", json.dumps(grouped_workloads))
+            self.valkey.set("cml_search_data", json.dumps(search_data))
+            logging.info("Successfully updated Valkey cache.")
+        except Exception as e:
+            logging.error(f"Error fetching/caching data: {e}")
 
     def get(self, user, filter=None, search_filter=None, search_value=None, order_by=None, desc=None):
-        workloads = self.workload
+        # Read the single source of truth from Valkey
+        cached_data = self.valkey.get("cml_workloads")
+        workloads = json.loads(cached_data) if cached_data else []
 
         # filter for user workload if user is not admin
         if not user.is_admin:
@@ -97,7 +101,6 @@ class WorkloadManager():
                 workloads = sorted(workloads, key=lambda x: (-x['ram'], -x['cpu']))
             else:
                 workloads = sorted(workloads, key=lambda x: (x['ram'], x['cpu']))
-        # order by
 
         filters = {
             "filter": to_be_filter,
@@ -110,19 +113,14 @@ class WorkloadManager():
         return workloads, counts, filters
 
     def get_search_data(self):
-        return self.search_data
+        cached_data = self.valkey.get("cml_search_data")
+        return json.loads(cached_data) if cached_data else {}
 
     def refresh(self):
-        if self.thread:
-            self.thread.cancel()
+        """Forces an immediate update to Valkey (e.g., UI 'Refresh Data' button)"""
+        self.fetch_and_cache()
 
-        self.workload, self.search_data = workload_report()
-        self.group_workload_by_id() # some sub tasks are listed as seperate tasks we group all tasks with the same id
-        self.thread = threading.Timer(self.interval, self.start_caching)
-        self.thread.start()
-
-    def group_workload_by_id(self):
-        workloads = self.workload
+    def group_workload_by_id(self, workloads):
         unique_ids = list({w['id'] for w in workloads})
         grouped_workloads = []
         for id in unique_ids:
@@ -180,14 +178,15 @@ class WorkloadManager():
                 "sub_workload": items
             })
 
-        self.workload = grouped_workloads
+        return grouped_workloads
 
     def expand_sub_workloads(self):
-        workloads = self.workload
+        cached_data = self.valkey.get("cml_workloads")
+        workloads = json.loads(cached_data) if cached_data else []
 
         expanded_workloads = []
         for workload in workloads:
-            sub_workload = workload["sub_workload"]
+            sub_workload = workload.get("sub_workload", [])
             workload.pop("has_sub_workload", None)
             workload.pop("sub_workload", None)
 

@@ -47,14 +47,11 @@ workload_manager = None
 
 
 def init_workload_manager():
-    """
-    Helper function to instantiate and start the global workload manager.
-    """
+    """Helper function to instantiate and start the global workload manager."""
     global workload_manager
     if workload_manager is None:
         # Import here if needed to avoid circular imports, or assume it's imported at the top
-        workload_manager = WorkloadManager(60)
-        workload_manager.start_caching()
+        workload_manager = WorkloadManager()
         print("Workload Manager initialized and caching started.")
 
 
@@ -102,7 +99,8 @@ with app.app_context():
 
 def sync_alert_processes(app):
     """
-    Runs when ever the configs table is updated to manage Alert background processes
+    Runs the synchronization logic inside an application context.
+    We pass 'app' so the database queries work inside the new thread.
     """
     with app.app_context():
         try:
@@ -165,6 +163,8 @@ def page_not_found(e):
 
 @app.before_request
 def enforce_access_policies():
+    """Runs before every request to enforce global security and state policies."""
+    
     # Allow safe routing during the absolute initial setup phase
     allowed_admin_setup = ['setup_admin_page', 'create_admin', 'static']
     
@@ -640,7 +640,7 @@ def home():
                         cml_configured=is_cml_configed(), \
                         workloads=workloads[start_index:end_index], \
                         search_data=search_data_json, \
-                        usernames=search_data[SearchFilters.USERNAME.value], \
+                        usernames=search_data.get(SearchFilters.USERNAME.value, []), \
                         num_sessions=counts[WorkloadType.SESSION.value], \
                         num_applications=counts[WorkloadType.APPLICATION.value], \
                         num_jobs=counts[WorkloadType.JOB.value], \

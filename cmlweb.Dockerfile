@@ -47,6 +47,7 @@ RUN apt-get update && apt-get dist-upgrade -y && \
   libsasl2-2 \
   libsasl2-modules-gssapi-mit \
   libzmq3-dev \
+  valkey \
   cpio \
   cmake \
   unixodbc \
