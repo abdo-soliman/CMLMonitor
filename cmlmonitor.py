@@ -24,6 +24,7 @@ WORKSPACE_DOMAIN = None
 API_KEY = None
 NAMESPACE_PREFIX = None
 KUBECONFIG_PATH = None
+ECS_WEBUI_BASE_URL = None
 smtp_enabled = None
 smtp_use_tls = None
 smtp_server = None
@@ -472,7 +473,7 @@ def report_daemon(cutoff_age_seconds):
 
 
 def set_configs():
-    global smtp_enabled, smtp_use_tls, smtp_port, smtp_server, smtp_user, smtp_password, smtp_alert_subject, smtp_report_subject, sender_email, alert_recipient_emails, report_recipient_emails, WORKSPACE_DOMAIN, API_KEY, NAMESPACE_PREFIX, KUBECONFIG_PATH, LDAP_ENABLED, LDAP_SERVER, LDAP_PORT, BIND_USER_DN, BIND_USER_PASSWORD, BASE_DN, alert_cron_string, report_cron_string, alert_cron_changed, report_cron_changed
+    global smtp_enabled, smtp_use_tls, smtp_port, smtp_server, smtp_user, smtp_password, smtp_alert_subject, smtp_report_subject, sender_email, alert_recipient_emails, report_recipient_emails, WORKSPACE_DOMAIN, API_KEY, NAMESPACE_PREFIX, KUBECONFIG_PATH, ECS_WEBUI_BASE_URL, LDAP_ENABLED, LDAP_SERVER, LDAP_PORT, BIND_USER_DN, BIND_USER_PASSWORD, BASE_DN, alert_cron_string, report_cron_string, alert_cron_changed, report_cron_changed
 
     configs = get_configs()
 
@@ -504,6 +505,7 @@ def set_configs():
     API_KEY = validate_none_or_empty(cmlapi_config.get("API_KEY")).replace('"', '')
     NAMESPACE_PREFIX = validate_none_or_empty(cmlapi_config.get("NAMESPACE_PREFIX")).replace('"', '')
     KUBECONFIG_PATH = validate_none_or_empty(cmlapi_config.get("KUBECONFIG_PATH")).replace('"', '')
+    ECS_WEBUI_BASE_URL = validate_none_or_empty(cmlapi_config.get("ECS_WEBUI_BASE_URL")).replace('"', '')
 
     LDAP_ENABLED = validate_none_or_empty(ldap_config.get("LDAP_ENABLED"))
     if LDAP_ENABLED:

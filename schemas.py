@@ -46,6 +46,7 @@ class CMLSchema(BaseModel):
     api_key: str
     namespace_prefix: str
     kubeconfig_content: Optional[str] = None
+    ecs_webui_base_url: Optional[str] = None
 
 
 class AlertsSchema(BaseModel):

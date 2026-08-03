@@ -40,6 +40,7 @@ def init_configs(username):
             {'attr': 'cml.api_key', 'value': ''},
             {'attr': 'cml.namespace_prefix', 'value': ''},
             {'attr': 'cml.kubeconfig_path', 'value': ''},
+            {'attr': 'cml.ecs_webui_base_url', 'value': ''},
 
             # Alert Defaults
             {'attr': 'alert.enabled', 'value': '0'},
@@ -119,6 +120,7 @@ def get_configs():
         'cml.api_key': ('cmlapi', 'API_KEY', safe_str),
         'cml.namespace_prefix': ('cmlapi', 'NAMESPACE_PREFIX', safe_str),
         'cml.kubeconfig_path': ('cmlapi', 'KUBECONFIG_PATH', safe_str),
+        'cml.ecs_webui_base_url': ('cmlapi', 'ECS_WEBUI_BASE_URL', safe_str),
 
         # LDAP
         'ldap.enabled': ('ldap', 'LDAP_ENABLED', safe_bool),

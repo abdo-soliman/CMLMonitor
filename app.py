@@ -769,7 +769,8 @@ def update_cml():
     raw_data = {
         'workspace_domain': request.form.get('workspace_domain', ''),
         'api_key': request.form.get('api_key', ''),
-        'namespace_prefix': request.form.get('namespace_prefix', '')
+        'namespace_prefix': request.form.get('namespace_prefix', ''),
+        'ecs_webui_base_url': request.form.get('ecs_webui_base_url', '')
     }
 
     # Intercept the uploaded file (if provided)
@@ -794,7 +795,8 @@ def update_cml():
     valid_cml_configs = {
         'cml.workspace_domain': valid_data.workspace_domain,
         'cml.api_key': valid_data.api_key,
-        'cml.namespace_prefix': valid_data.namespace_prefix
+        'cml.namespace_prefix': valid_data.namespace_prefix,
+        'cml.ecs_webui_base_url': valid_data.ecs_webui_base_url
     }
 
     # Update standard CML configs
