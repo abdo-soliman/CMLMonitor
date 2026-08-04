@@ -12,9 +12,17 @@
 <body>
     <nav class="navbar navbar-expand-lg fixed-top bg-white border-bottom">
         <div class="container-fluid">
-            <a class="navbar-brand" href="#">
+            <a class="navbar-brand" href="/">
                 CML <span>MONITOR</span>
             </a>
+
+            <ul class="navbar-nav me-auto ms-4 mb-2 mb-lg-0">
+                {% if user.is_admin %}
+                <li class="nav-item">
+                    <a class="nav-link" href="/runtimes">Runtimes</a>
+                </li>
+                {% endif %}
+            </ul>
 
             <div class="d-flex align-items-center">
                 {% if user.config_admin %}

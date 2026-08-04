@@ -36,3 +36,28 @@ class Config(db.Model):
     updated_at = db.Column(db.DateTime, default=db.func.now(), onupdate=db.func.now(), nullable=False)
 
     user = db.relationship('User', backref='updated_configs')
+
+
+class Runtime(db.Model):
+    __tablename__ = 'runtimes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    image = db.Column(db.String(500), nullable=False)
+    editor_name = db.Column(db.String(100), nullable=False)
+    editor_version = db.Column(db.String(50), nullable=False)
+    status = db.Column(db.String(20), default='ENABLED', nullable=False)
+
+    # Foreign key linking to the User table's username column
+    added_by = db.Column(db.String(150), db.ForeignKey('users.username'), nullable=True)
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=db.func.now(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=db.func.now(), onupdate=db.func.now(), nullable=False)
+
+    # Enforce strictly ENABLED or DISABLED statuses at the database level
+    __table_args__ = (
+        db.CheckConstraint("status IN ('ENABLED', 'DISABLED')", name='check_valid_status'),
+    )
+
+    # Relationship to user
+    user = db.relationship('User', backref='added_runtimes')
