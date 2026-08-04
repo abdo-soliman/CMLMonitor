@@ -11,11 +11,11 @@ import pandas as pd
 import process_manager
 from extensions import db
 from sqlalchemy import event
-from models import User, Config
 from flask_migrate import Migrate
 from pydantic import ValidationError
 from cmlmonitor_db import init_configs
 from smtp_utils import smtp_test_email
+from models import User, Config, Runtime
 from workload_manager import WorkloadManager
 from werkzeug.security import check_password_hash, generate_password_hash
 from schemas import AdminSchema, SetupSchema, LDAPSchema, CMLSchema, AlertsSchema
@@ -654,18 +654,56 @@ def home():
 def runtimes():
     if not current_user or current_user.is_anonymous:
             return redirect(url_for('login'))
-    
+
     if not current_user.is_admin:
         return jsonify({"error": "Unauthorized"}), 401
 
-    # 2. Get pagination arguments from URL (e.g., ?page=1&size=25)
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('size', 25, type=int)
+    hide_disabled = request.args.get('hide_disabled', 'true').lower() == 'true'
+    sort_status = request.args.get('sort_status', 'none').lower()
 
-    # 3. Query the database with pagination
-    runtimes_pagination = Runtime.query.order_by(Runtime.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    # Check if the request is an AJAX call expecting JSON
+    is_api = request.args.get('api', 'false').lower() == 'true'
 
-    # 4. User context dictionary (matches your home route structure)
+    query = Runtime.query
+
+    if hide_disabled:
+        query = query.filter(Runtime.status == 'ENABLED')
+
+    if not hide_disabled and sort_status == 'asc':
+        query = query.order_by(Runtime.status.desc(), Runtime.editor_name.asc())
+    elif not hide_disabled and sort_status == 'desc':
+        query = query.order_by(Runtime.status.asc(), Runtime.editor_name.asc())
+    else:
+        query = query.order_by(Runtime.editor_name.asc())
+
+    runtimes_pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
+    # If requested by our JS fetch() function, return JSON
+    if is_api:
+        items = []
+        for r in runtimes_pagination.items:
+            items.append({
+                "editor_name": r.editor_name,
+                "editor_version": r.editor_version,
+                "image": r.image,
+                "added_by": r.added_by,
+                "status": r.status
+            })
+            
+        return jsonify({
+            "runtimes": items,
+            "pagination": {
+                "has_prev": runtimes_pagination.has_prev,
+                "has_next": runtimes_pagination.has_next,
+                "prev_num": runtimes_pagination.prev_num,
+                "next_num": runtimes_pagination.next_num,
+                "page": runtimes_pagination.page,
+                "pages": runtimes_pagination.pages
+            }
+        })
+
     user = {
         "username": current_user.username,
         "fullname": current_user.fullname,
@@ -674,11 +712,7 @@ def runtimes():
         "config_admin": current_user.config_admin
     }
 
-    return render_template('runtimes.html', 
-                           user=user, 
-                           runtimes=runtimes_pagination.items, 
-                           pagination=runtimes_pagination,
-                           current_size=per_page)
+    return render_template('runtimes.html', user=user)
 
 
 @app.route('/config')

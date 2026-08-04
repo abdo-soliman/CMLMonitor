@@ -17,7 +17,7 @@
                 CML <span>MONITOR</span>
             </a>
 
-            <!-- 2. NEW: Left-aligned normal navigation links -->
+            <!-- 2. Left-aligned normal navigation links -->
             <ul class="navbar-nav me-auto ms-4 mb-2 mb-lg-0">
                 {% if user.is_admin %}
                 <li class="nav-item">
@@ -62,83 +62,78 @@
 
     <div class="main-content">
         <div style="display: flex; justify-content: right; align-items: center; margin-bottom: 25px;">
-            <button class="d-flex btn btn-primary btn-sm" style="height: 35px">
+            <button class="d-flex btn btn-primary btn-sm" style="height: 35px" onclick="fetchData()">
                 Refresh Table
             </button>
         </div>
 
         <div class="actions-container d-flex justify-content-between mb-3">
-            <div class="d-flex justify-content-end align-items-center p-3"></div>
+            <!-- Hide Disabled Toggle -->
+            <div class="d-flex justify-content-start align-items-center p-3">
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" role="switch" id="hideDisabledToggle" checked onchange="toggleDisabledRuntimes()">
+                    <label class="form-check-label fw-semibold text-secondary ms-2" for="hideDisabledToggle" style="user-select: none; cursor: pointer;">Hide Disabled</label>
+                </div>
+            </div>
 
             <div class="pagination-container d-flex justify-content-end align-items-center p-3">
                 <nav aria-label="Table pagination" class="me-3">
                     <ul class="pagination pagination-sm mb-0">
-                        <!-- Previous Page Logic -->
-                        <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
-                            <a class="page-link" href="{{ url_for('runtimes', page=pagination.prev_num, size=current_size) if pagination.has_prev else '#' }}">
-                                <i class="fa-solid fa-angle-left"></i>
-                            </a>
+                        <li class="page-item disabled" id="btn-first">
+                            <button class="page-link"><i class="fa-solid fa-backward-step"></i></button>
                         </li>
-                        
-                        <!-- Next Page Logic -->
-                        <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
-                            <a class="page-link" href="{{ url_for('runtimes', page=pagination.next_num, size=current_size) if pagination.has_next else '#' }}">
-                                <i class="fa-solid fa-angle-right"></i>
-                            </a>
+                        <li class="page-item disabled" id="btn-prev">
+                            <button class="page-link"><i class="fa-solid fa-angle-left"></i></button>
+                        </li>
+                        <li class="page-item disabled" id="btn-next">
+                            <button class="page-link"><i class="fa-solid fa-angle-right"></i></button>
+                        </li>
+                        <li class="page-item disabled" id="btn-last">
+                            <button class="page-link"><i class="fa-solid fa-forward-step"></i></button>
                         </li>
                     </ul>
                 </nav>
 
                 <div class="d-flex align-items-center">
-                    <select class="form-select form-select-sm search-input" style="width: 70px; border-radius: 5px; height: 35px;" onchange="window.location.href='?size=' + this.value;">
-                        <option value="25" {% if current_size == 25 %}selected{% endif %}>25</option>
-                        <option value="50" {% if current_size == 50 %}selected{% endif %}>50</option>
-                        <option value="100" {% if current_size == 100 %}selected{% endif %}>100</option>
+                    <select id="pageSizeSelect" class="form-select form-select-sm search-input" style="width: 70px; border-radius: 5px; height: 35px;" onchange="changePageSize(this.value)">
+                        <option value="25" selected>25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
                     </select>
                 </div>
             </div>
         </div>
 
-        {% if runtimes and runtimes|length > 0 %}
-            <div class="table-container">
-                <table class="table table-hover">
-                    <thead>
-                        <tr>
-                            <th>Editor</th>
-                            <th>Version</th>
-                            <th>Image URL</th>
-                            <th>Added By</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for runtime in runtimes %}
-                        <tr>
-                            <td><strong>{{ runtime.editor_name }}</strong></td>
-                            <td><span class="badge-id text-muted small">{{ runtime.editor_version }}</span></td>
-                            <td class="text-muted" style="word-break: break-all;">{{ runtime.image }}</td>
-                            <td>{{ runtime.added_by }}</td>
-                            <td>
-                                {% if runtime.status == 'ENABLED' %}
-                                    <span class="badge badge-schedule badge-schedule-running">ENABLED</span>
-                                {% else %}
-                                    <span class="badge badge-schedule bg-secondary text-white">DISABLED</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        {% else %}
-            <div class="container text-center py-5 mt-4 bg-white rounded border" style="border-style: dashed !important; border-width: 2px !important;">
-                <i class="fa-solid fa-layer-group text-secondary mb-3" style="font-size: 3rem;"></i>
-                <h5 class="text-secondary mb-2">No Runtimes Found</h5>
-                <p class="text-muted mb-0">There are currently no runtimes tracked in the system.</p>
-            </div>
-        {% endif %}
+        <!-- Data Container (Hidden if no data) -->
+        <div class="table-container" id="data-container" style="display: none;">
+            <table class="table table-hover" id="runtimesTable">
+                <thead>
+                    <tr>
+                        <th>Editor</th>
+                        <th>Version</th>
+                        <th>Image URL</th>
+                        <th>Added By</th>
+                        <th id="statusColumnHeader" onclick="sortStatusColumn()" style="user-select: none; cursor: default;">
+                            Status 
+                            <i id="statusSortIcon" class="fa-solid fa-sort text-muted sort-icon ms-1" style="display: none;"></i>
+                        </th>
+                    </tr>
+                </thead>
+                <tbody id="runtimesTableBody">
+                    <!-- Javascript will inject rows here -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Empty State Container (Hidden if data exists) -->
+        <div id="empty-state" class="container text-center py-5 mt-4 bg-white rounded border" style="border-style: dashed !important; border-width: 2px !important; display: none;">
+            <i class="fa-solid fa-layer-group text-secondary mb-3" style="font-size: 3rem;"></i>
+            <h5 class="text-secondary mb-2">No Runtimes Found</h5>
+            <p class="text-muted mb-0">There are currently no runtimes tracked in the system.</p>
+        </div>
     </div>
 
     <script src="static/js/bootstrap5.3.0.bundle.min.js"></script>
+    <script src="static/js/runtime.js"></script>
 </body>
 </html>
