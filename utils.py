@@ -56,57 +56,6 @@ def is_none_or_empty(variable):
     return variable is None or variable == ""
 
 
-def validate_none_or_empty(variable):
-    """
-    Checks if None or Empty Raise Value Error Exception or return the variable
-
-    Params: variable -> any
-    Returns: variable -> any, the same variable passed if it's None or empty string.
-    """
-
-    if variable is None:
-        raise ValueError("All Config variables must be avialable with correct vaules")
-
-    if variable == "":
-        raise ValueError("All Config variables must be avialable with correct vaules")
-
-    return variable
-
-
-def safe_str(val):
-    """
-    Cast passed val to string if not None or empty string
-
-    Params: val -> any
-    Returns: val -> str, passed value casted to string.
-    """
-    return str(val) if val is not None else ""
-
-
-def safe_int(val):
-    """
-    Cast passed val to integer or return None
-
-    Params: val -> any
-    Returns: val -> int, passed value casted to integer.
-    """
-    try:
-        return int(val)
-    except (ValueError, TypeError):
-        return None  # Returns None if the port is blank or invalid
-
-
-def safe_bool(val):
-    """
-    Cast passed val to boolean or return None
-
-    Params: val -> any
-    Returns: val -> bool, passed value casted to integer.
-    """
-    # Database stores '1' or '0', but this also catches 'true' just in case
-    return str(val).strip().lower() in ['1', 'true', 'yes']
-
-
 def split_age(age):
     """
     takes an age string [0-9]d[0-9]h[0-9]m[0-9]s converts it to a dictionary

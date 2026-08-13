@@ -3,7 +3,6 @@ import pandas as pd
 from flask import Flask
 from extensions import db
 from models import User, Config
-from utils import safe_str, safe_int, safe_bool
 from werkzeug.security import generate_password_hash
 
 
@@ -97,64 +96,6 @@ def export_configs_to_csv(filename):
             print(f"[+] Successfully exported {len(df)} configs to '{filename}'.")
         except Exception as e:
             print(f"[-] Error during pandas export: {e}")
-
-
-def get_configs():
-    # 1. Define the mapping: DB Attribute -> (Section, Dictionary Key, Cast Function)
-    schema_mapping = {
-        # SMTP
-        'alert.enabled': ('smtp', 'smtp_enabled', safe_bool),
-        'alert.smtp.use_tls': ('smtp', 'smtp_use_tls', safe_bool), # Cast to bool
-        'alert.smtp.server': ('smtp', 'smtp_server', safe_str),
-        'alert.smtp.port': ('smtp', 'smtp_port', safe_int),        # Cast to int
-        'alert.smtp.user': ('smtp', 'smtp_user', safe_str),
-        'alert.smtp.password': ('smtp', 'smtp_password', safe_str),
-        'alert.smtp.alert_subject': ('smtp', 'smtp_alert_subject', safe_str),
-        'alert.smtp.report_subject': ('smtp', 'smtp_report_subject', safe_str),
-        'alert.smtp.sender_email': ('smtp', 'sender_email', safe_str),
-        'alert.smtp.alert_recipient_emails': ('smtp', 'alert_recipient_emails', safe_str),
-        'alert.smtp.report_recipient_emails': ('smtp', 'report_recipient_emails', safe_str),
-
-        # CML API
-        'cml.workspace_domain': ('cmlapi', 'WORKSPACE_DOMAIN', safe_str),
-        'cml.api_key': ('cmlapi', 'API_KEY', safe_str),
-        'cml.namespace_prefix': ('cmlapi', 'NAMESPACE_PREFIX', safe_str),
-        'cml.kubeconfig_path': ('cmlapi', 'KUBECONFIG_PATH', safe_str),
-        'cml.ecs_webui_base_url': ('cmlapi', 'ECS_WEBUI_BASE_URL', safe_str),
-
-        # LDAP
-        'ldap.enabled': ('ldap', 'LDAP_ENABLED', safe_bool),
-        'ldap.server': ('ldap', 'LDAP_SERVER', safe_str),
-        'ldap.port': ('ldap', 'LDAP_PORT', safe_int),              # Cast to int
-        'ldap.bind_dn': ('ldap', 'BIND_USER_DN', safe_str),
-        'ldap.bind_password': ('ldap', 'BIND_USER_PASSWORD', safe_str),
-        'ldap.base_dn': ('ldap', 'BASE_DN', safe_str),
-
-        # Runtime
-        'alert.runtime.alert_cron': ('runtime', 'alert_daemon', safe_str),
-        'alert.runtime.report_cron': ('runtime', 'report_daemon', safe_str)
-    }
-
-    # 2. Initialize the nested dictionary
-    config_data = {
-        'smtp': {},
-        'cmlapi': {},
-        'ldap': {},
-        'runtime': {}
-    }
-
-    with app.app_context():
-        db_configs = Config.query.all()
-
-        # 4. Populate the dictionary and apply the type cast
-        for item in db_configs:
-            if item.attr in schema_mapping:
-                section, dict_key, cast_func = schema_mapping[item.attr]
-                
-                # Pass the raw database value through the assigned casting function
-                config_data[section][dict_key] = cast_func(item.value)
-
-        return config_data
 
 
 def create_local_user(username, password, mail, fullname, is_admin, config_admin):

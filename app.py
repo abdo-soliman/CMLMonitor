@@ -9,8 +9,8 @@ import tempfile
 import threading
 import pandas as pd
 import process_manager
-from extensions import db
 from sqlalchemy import event
+from extensions import db, app
 from flask_migrate import Migrate
 from pydantic import ValidationError
 from cmlmonitor_db import init_configs
@@ -26,15 +26,7 @@ from utils import WorkloadType, SearchFilters, OrderByFilters, pagination_to_ind
 from flask import Flask, flash, render_template, request, redirect, url_for, jsonify, send_file, current_app
 
 
-app = Flask(__name__)
 app.secret_key = 'super_secret_key'  # Change this in production
-
-
-# --- Database Configuration ---
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///cmlmonitor.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db.init_app(app)
-
 # Add this line to link migrations to your app and db
 migrate = Migrate(app, db, render_as_batch=True) 
 # Note: render_as_batch=True is highly recommended for SQLite!

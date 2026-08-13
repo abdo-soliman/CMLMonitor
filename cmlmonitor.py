@@ -8,16 +8,16 @@ import argparse
 import pandas as pd
 from pathlib import Path
 from pprint import pprint
+from extensions import app
 from utils import SearchFilters
 from smtp_utils import send_email
 from kubernetes import client, config
-from cmlmonitor_db import get_configs
 from ldap_utils import get_user_full_name
 from kubernetes.client.rest import ApiException
 from jinja2 import Environment, FileSystemLoader
 from datetime import datetime, timezone, timedelta
 from croniter import croniter, CroniterBadCronError
-from utils import split_age, age_toseconds, seconds_to_age, age_dict_tostring, keep_only_arabic, validate_none_or_empty
+from utils import split_age, age_toseconds, seconds_to_age, age_dict_tostring, keep_only_arabic
 
 
 WORKSPACE_DOMAIN = None
@@ -25,7 +25,7 @@ API_KEY = None
 NAMESPACE_PREFIX = None
 KUBECONFIG_PATH = None
 ECS_WEBUI_BASE_URL = None
-smtp_enabled = None
+alerts_enabled = None
 smtp_use_tls = None
 smtp_server = None
 smtp_port = None
@@ -138,7 +138,7 @@ def test_kube_config(kube_config_file_path):
 def update_configs_or_exit():
     set_configs()
 
-    if not smtp_enabled:
+    if not alerts_enabled:
         exit()
 
     if MODE == "alert" and alert_cron_string == "":
@@ -473,56 +473,53 @@ def report_daemon(cutoff_age_seconds):
 
 
 def set_configs():
-    global smtp_enabled, smtp_use_tls, smtp_port, smtp_server, smtp_user, smtp_password, smtp_alert_subject, smtp_report_subject, sender_email, alert_recipient_emails, report_recipient_emails, WORKSPACE_DOMAIN, API_KEY, NAMESPACE_PREFIX, KUBECONFIG_PATH, ECS_WEBUI_BASE_URL, LDAP_ENABLED, LDAP_SERVER, LDAP_PORT, BIND_USER_DN, BIND_USER_PASSWORD, BASE_DN, alert_cron_string, report_cron_string, alert_cron_changed, report_cron_changed
+    global alerts_enabled, smtp_use_tls, smtp_port, smtp_server, smtp_user, smtp_password, smtp_alert_subject, smtp_report_subject, sender_email, alert_recipient_emails, report_recipient_emails, WORKSPACE_DOMAIN, API_KEY, NAMESPACE_PREFIX, KUBECONFIG_PATH, ECS_WEBUI_BASE_URL, LDAP_ENABLED, LDAP_SERVER, LDAP_PORT, BIND_USER_DN, BIND_USER_PASSWORD, BASE_DN, alert_cron_string, report_cron_string, alert_cron_changed, report_cron_changed
 
-    configs = get_configs()
+    with app.app_context():
+        ldap_configs = Config.get_configs("ldap")
+        cml_configs = Config.get_configs("cml")
+        alert_configs = Config.get_configs("alert")
+        runtime_configs = Config.get_configs("runtime")
 
-    smtp_config = configs["smtp"]
-    cmlapi_config = configs["cmlapi"]
-    ldap_config = configs["ldap"]
-    runtime_config = configs["runtime"]
-
-    smtp_enabled = validate_none_or_empty(smtp_config.get("smtp_enabled"))
-    if smtp_enabled:
-        smtp_use_tls = validate_none_or_empty(smtp_config.get("smtp_use_tls"))
-        smtp_port = validate_none_or_empty(smtp_config.get("smtp_port"))
-        smtp_server = validate_none_or_empty(smtp_config.get("smtp_server")).replace('"', '')
-        smtp_user = validate_none_or_empty(smtp_config.get("smtp_user")).replace('"', '')
-        smtp_password = validate_none_or_empty(smtp_config.get("smtp_password")).replace('"', '')
-        smtp_alert_subject = validate_none_or_empty(smtp_config.get("smtp_alert_subject")).replace('"', '')
-        smtp_report_subject = validate_none_or_empty(smtp_config.get("smtp_report_subject")).replace('"', '')
-        sender_email = validate_none_or_empty(smtp_config.get("sender_email")).replace('"', '')
-        alert_recipient_emails = ast.literal_eval(validate_none_or_empty(smtp_config.get("alert_recipient_emails")))
-        report_recipient_emails = ast.literal_eval(validate_none_or_empty(smtp_config.get("report_recipient_emails")))
+        alerts_enabled = alert_configs.get("alert_enabled")
+        smtp_use_tls = alert_configs.get("smtp_use_tls")
+        smtp_port = alert_configs.get("smtp_port")
+        smtp_server = alert_configs.get("smtp_server")
+        smtp_user = alert_configs.get("smtp_user")
+        smtp_password = alert_configs.get("smtp_password")
+        smtp_alert_subject = alert_configs.get("smtp_alert_subject")
+        smtp_report_subject = alert_configs.get("smtp_report_subject")
+        sender_email = alert_configs.get("sender_email")
+        alert_recipient_emails = ast.literal_eval(alert_configs.get("alert_recipient_emails"))
+        report_recipient_emails = ast.literal_eval(alert_configs.get("report_recipient_emails"))
 
         if not isinstance(alert_recipient_emails, list):
             raise TypeError("alert_recipient_emails must be a list of emails")
-    
+
         if not isinstance(report_recipient_emails, list):
             raise TypeError("report_recipient_emails must be a list of emails")
 
-    WORKSPACE_DOMAIN = validate_none_or_empty(cmlapi_config.get("WORKSPACE_DOMAIN")).replace('"', '')
-    API_KEY = validate_none_or_empty(cmlapi_config.get("API_KEY")).replace('"', '')
-    NAMESPACE_PREFIX = validate_none_or_empty(cmlapi_config.get("NAMESPACE_PREFIX")).replace('"', '')
-    KUBECONFIG_PATH = validate_none_or_empty(cmlapi_config.get("KUBECONFIG_PATH")).replace('"', '')
-    ECS_WEBUI_BASE_URL = validate_none_or_empty(cmlapi_config.get("ECS_WEBUI_BASE_URL")).replace('"', '')
+        WORKSPACE_DOMAIN = cml_configs.get("WORKSPACE_DOMAIN")
+        API_KEY = cml_configs.get("API_KEY")
+        NAMESPACE_PREFIX = cml_configs.get("NAMESPACE_PREFIX")
+        KUBECONFIG_PATH = cml_configs.get("KUBECONFIG_PATH")
+        ECS_WEBUI_BASE_URL = cml_configs.get("ECS_WEBUI_BASE_URL")
 
-    LDAP_ENABLED = validate_none_or_empty(ldap_config.get("LDAP_ENABLED"))
-    if LDAP_ENABLED:
-        LDAP_SERVER = validate_none_or_empty(ldap_config.get("LDAP_SERVER"))
-        LDAP_PORT = validate_none_or_empty(ldap_config.get("LDAP_PORT"))
-        BASE_DN = validate_none_or_empty(ldap_config.get("BASE_DN"))
-        BIND_USER_DN = validate_none_or_empty(ldap_config.get("BIND_USER_DN"))
-        BIND_USER_PASSWORD = validate_none_or_empty(ldap_config.get("BIND_USER_PASSWORD"))
+        LDAP_ENABLED = ldap_configs.get("LDAP_ENABLED")
+        LDAP_SERVER = ldap_configs.get("LDAP_SERVER")
+        LDAP_PORT = ldap_configs.get("LDAP_PORT")
+        BASE_DN = ldap_configs.get("BASE_DN")
+        BIND_USER_DN = ldap_configs.get("BIND_USER_DN")
+        BIND_USER_PASSWORD = ldap_configs.get("BIND_USER_PASSWORD")
 
-    new_alert_cron_string = runtime_config.get("alert_daemon").replace('"', '')
-    new_report_cron_string = runtime_config.get("report_daemon").replace('"', '')
+        new_alert_cron_string = runtime_configs.get("alert_daemon")
+        new_report_cron_string = runtime_configs.get("report_daemon")
 
-    alert_cron_changed = new_alert_cron_string != alert_cron_string
-    report_cron_changed = new_report_cron_string != report_cron_string
+        alert_cron_changed = new_alert_cron_string != alert_cron_string
+        report_cron_changed = new_report_cron_string != report_cron_string
 
-    alert_cron_string = new_alert_cron_string
-    report_cron_string = new_report_cron_string
+        alert_cron_string = new_alert_cron_string
+        report_cron_string = new_report_cron_string
 
 
 if __name__ == "__main__":
@@ -560,7 +557,7 @@ if __name__ == "__main__":
         if args.dry_run:
             # exit if smtp is disabled by admin
             set_configs()
-            if not smtp_enabled:
+            if not alerts_enabled:
                 exit()
 
             logging.info("Starting Dry Run ...")

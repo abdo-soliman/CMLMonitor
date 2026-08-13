@@ -37,6 +37,94 @@ class Config(db.Model):
 
     user = db.relationship('User', backref='updated_configs')
 
+    @classmethod
+    def get_configs(cls, root):
+        def safe_str(val, validate=False):
+            return str(val) if val is not None else ""
+
+        def safe_int(val):
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                return None  # Returns None if the port is blank or invalid
+
+        def safe_bool(val):
+            # Database stores '1' or '0', but this also catches 'true' just in case
+            return str(val).strip().lower() in ['1', 'true', 'yes']
+
+        def validate_none_or_empty(variable):
+            if variable is None:
+                raise ValueError("All Config variables must be avialable with correct vaules")
+
+            if variable == "":
+                raise ValueError("All Config variables must be avialable with correct vaules")
+
+            return variable
+
+        # 1. Define the mapping: DB Attribute -> (Section, Dictionary Key, Cast Function)
+        schema_mapping = {
+            # SMTP
+            'alert.enabled': ('alert', 'alert_enabled', safe_bool),
+            'alert.smtp.use_tls': ('alert', 'smtp_use_tls', safe_bool), # Cast to bool
+            'alert.smtp.server': ('alert', 'smtp_server', safe_str),
+            'alert.smtp.port': ('alert', 'smtp_port', safe_int),        # Cast to int
+            'alert.smtp.user': ('alert', 'smtp_user', safe_str),
+            'alert.smtp.password': ('alert', 'smtp_password', safe_str),
+            'alert.smtp.alert_subject': ('alert', 'smtp_alert_subject', safe_str),
+            'alert.smtp.report_subject': ('alert', 'smtp_report_subject', safe_str),
+            'alert.smtp.sender_email': ('alert', 'sender_email', safe_str),
+            'alert.smtp.alert_recipient_emails': ('alert', 'alert_recipient_emails', safe_str),
+            'alert.smtp.report_recipient_emails': ('alert', 'report_recipient_emails', safe_str),
+
+            # CML API
+            'cml.workspace_domain': ('cml', 'WORKSPACE_DOMAIN', safe_str),
+            'cml.api_key': ('cml', 'API_KEY', safe_str),
+            'cml.namespace_prefix': ('cml', 'NAMESPACE_PREFIX', safe_str),
+            'cml.kubeconfig_path': ('cml', 'KUBECONFIG_PATH', safe_str),
+            'cml.ecs_webui_base_url': ('cml', 'ECS_WEBUI_BASE_URL', safe_str),
+
+            # LDAP
+            'ldap.enabled': ('ldap', 'LDAP_ENABLED', safe_bool),
+            'ldap.server': ('ldap', 'LDAP_SERVER', safe_str),
+            'ldap.port': ('ldap', 'LDAP_PORT', safe_int),              # Cast to int
+            'ldap.bind_dn': ('ldap', 'BIND_USER_DN', safe_str),
+            'ldap.bind_password': ('ldap', 'BIND_USER_PASSWORD', safe_str),
+            'ldap.base_dn': ('ldap', 'BASE_DN', safe_str),
+
+            # Runtime
+            'alert.runtime.alert_cron': ('runtime', 'alert_daemon', safe_str),
+            'alert.runtime.report_cron': ('runtime', 'report_daemon', safe_str)
+        }
+    
+        # 2. Initialize the nested dictionary
+        config_data = {}
+
+        db_configs = cls.query.all()
+        validate_all = False
+        match root:
+            case "ldap":
+                validate_all = safe_bool(next((config for config in db_configs if config.attr == "ldap.enabled"), None))
+            case "alert":
+                validate_all = safe_bool(next((config for config in db_configs if config.attr == "alert.enabled"), None))
+            case "cml":
+                validate_all = True
+            case _:
+                validate_all = False
+
+        for item in db_configs:
+            mapping = schema_mapping.get(item.attr)
+            if mapping and root == mapping[0]:
+                dict_key = mapping[1]
+                cast_func = mapping[2]
+
+                config_data[dict_key] = cast_func(item.value)
+                if root == "cml" and dict_key == "ECS_WEBUI_BASE_URL":
+                    continue
+
+                config_data[dict_key] = validate_none_or_empty(config_data[dict_key]) if validate_all else config_data[dict_key]
+
+        return config_data
+
 
 class Runtime(db.Model):
     __tablename__ = 'runtimes'
