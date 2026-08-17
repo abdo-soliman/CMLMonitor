@@ -158,7 +158,7 @@ select.search-input:focus {
     border-radius: 4px;
 }
 
-/* Schedule badge */
+/* Schedule badge base */
 .badge-schedule {
     background-color: #e2e6ea;
     color: #333;
@@ -166,10 +166,43 @@ select.search-input:focus {
     padding: 5px 10px;
     border-radius: 4px;
     font-size: 12px;
+    text-transform: uppercase;
 }
+
+/* 4. NEW: Specific badge status colors for WorkloadStatus enum */
+.badge-schedule-pending {
+    background-color: #fef3c7;
+    color: #92400e;
+}
+
 .badge-schedule-running {
     background-color: #def7ec;
     color: #03543f;
+}
+
+.badge-schedule-waiting {
+    background-color: #feecdc;
+    color: #b43403;
+}
+
+.badge-schedule-succeeded {
+    background-color: #e0e7ff;
+    color: #3730a3;
+}
+
+.badge-schedule-terminated {
+    background-color: #f3f4f6;
+    color: #4b5563;
+}
+
+.badge-schedule-failed {
+    background-color: #fde8e8;
+    color: #9b1c1c;
+}
+
+.badge-schedule-unknown {
+    background-color: #e5e7eb;
+    color: #374151;
 }
 
 .actions-container {
@@ -188,6 +221,7 @@ select.search-input:focus {
     color: #bd2130;
     background-color: #fde8e8;
 }
+
 /* Pagination Styling */
 .pagination-container {
     background-color: #f8f9fa;
@@ -218,31 +252,25 @@ select.search-input:focus {
 }
 
 /* user details/logout dropdown */
-/* Ensures the dropdown expands to fit the content perfectly */
 .user-dropdown-hover .dropdown-menu {
-    min-width: max-content; /* Forces the container to be as wide as the longest text */
-    padding-top: 12px; /* Adds the requested padding to the top of the dropdown */
-
-    right: 0 !important;   /* Anchors the menu to the right side of the profile icon */
-    left: auto !important; /* Forces it to ignore left-side anchoring */
+    min-width: max-content;
+    padding-top: 12px;
+    right: 0 !important;
+    left: auto !important;
     margin-right: 15px;
 }
 
-/* Triggers the dropdown to open when hovering */
 .user-dropdown-hover:hover .dropdown-menu {
     display: block;
     margin-top: 0; 
 }
 
-/* Updated styling for the user details box */
 .user-details-box {
     background-color: #f8f9fa;
-    white-space: nowrap; /* Strictly prevents the name or email from wrapping */
+    white-space: nowrap;
     border-radius: 4px 4px 0 0;
-    /* Note: If you used margin-top: -8px from the previous code, remove it so your new top padding works correctly */
 }
 
-/* Adds a pointer cursor and a slight fade effect when hovering over the username/avatar */
 .user-dropdown-trigger {
     cursor: pointer;
     transition: opacity 0.2s ease-in-out;

@@ -1,20 +1,39 @@
-import logging
+import os
 import json
 import redis
-import os
-from cmlmonitor import workload_report
+import logging
+from datetime import datetime
+from cmlapi_manager import CMLAPIManager
 from utils import WorkloadType, SearchFilters, OrderByFilters
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(levelname)s] %(asctime)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
+# --- Custom JSON Encoder and Decoder for Datetime ---
+class DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
+
+def datetime_decoder(dct):
+    """Intercepts dictionaries during JSON loading to parse datetime strings."""
+    for key in ["start_time", "creation_time"]:
+        if key in dct and dct[key] is not None:
+            try:
+                dct[key] = datetime.fromisoformat(dct[key])
+            except (ValueError, TypeError):
+                pass
+    return dct
 
 class WorkloadManager():
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     def __init__(self):
+        self.cmlapi_manager = CMLAPIManager()
         # Initialize Valkey (Redis) Connection
-        # decode_responses=True ensures we get Python strings back instead of bytes
         valkey_host = os.getenv("VALKEY_HOST", "localhost")
         valkey_port = int(os.getenv("VALKEY_PORT", 6379))
         self.valkey = redis.Redis(host=valkey_host, port=valkey_port, db=0, decode_responses=True)
@@ -23,12 +42,11 @@ class WorkloadManager():
         """Fetches data from CML API, processes it, and caches it in Valkey."""
         logging.info("Fetching workload data from CML API...")
         try:
-            raw_workloads, search_data = workload_report()
+            raw_workloads, search_data = self.cmlapi_manager.workload_report()
             grouped_workloads = self.group_workload_by_id(raw_workloads)
 
-            # Store in Valkey using JSON serialization
-            self.valkey.set("cml_workloads", json.dumps(grouped_workloads))
-            self.valkey.set("cml_search_data", json.dumps(search_data))
+            self.valkey.set("cml_workloads", json.dumps(grouped_workloads, cls=DateTimeEncoder))
+            self.valkey.set("cml_search_data", json.dumps(search_data, cls=DateTimeEncoder))
             logging.info("Successfully updated Valkey cache.")
         except Exception as e:
             logging.error(f"Error fetching/caching data: {e}")
@@ -36,7 +54,7 @@ class WorkloadManager():
     def get(self, user, filter=None, search_filter=None, search_value=None, order_by=None, desc=None):
         # Read the single source of truth from Valkey
         cached_data = self.valkey.get("cml_workloads")
-        workloads = json.loads(cached_data) if cached_data else []
+        workloads = json.loads(cached_data, object_hook=datetime_decoder) if cached_data else []
 
         # filter for user workload if user is not admin
         if not user.is_admin:
@@ -121,59 +139,34 @@ class WorkloadManager():
         self.fetch_and_cache()
 
     def group_workload_by_id(self, workloads):
-        unique_ids = list({w['id'] for w in workloads})
+        for workload in workloads:
+            if workload["parent"]:
+                continue
+            if workload["role"] == "spark-executor":
+                workload["parent"] = workload["id"].split("-")[1]
+
+        unique_ids = list({w['parent'] if w["role"] == "spark-executor" else w['id'] for w in workloads})
         grouped_workloads = []
         for id in unique_ids:
-            sub_workload = [workload for workload in workloads if workload["id"] == id]
+            sub_workload = [workload for workload in workloads if workload["id"] == id or workload["parent"] == id]
             if len(sub_workload) == 1:
                 grouped_workloads.append({**sub_workload[0], "has_sub_workload": False, "sub_workload": []})
                 continue
 
-            name = sub_workload[0]["name"]
-            workload_type = sub_workload[0]["workload_type"]
-            user = sub_workload[0]["user"]
-            full_name = sub_workload[0]["full_name"]
-            show_full_name = sub_workload[0]["show_full_name"]
-            project = sub_workload[0]["project"]
-            namespace = sub_workload[0]["namespace"]
-            status = sub_workload[0]["status"]
-            age = sub_workload[0]["age"]
-            age_seconds = sub_workload[0]["age_seconds"]
             cpu = 0
             ram = 0
             items = []
+            parent = next((w for w in sub_workload if w["role"] != "spark-executor"), None)
             for workload in sub_workload:
-                if not workload["name"].endswith("_spark executor"):
-                    name = workload["name"]
-                    workload_type = workload["workload_type"]
-                    user = workload["user"]
-                    full_name = workload["full_name"]
-                    show_full_name = workload["show_full_name"]
-                    project = workload["project"]
-                    namespace = workload["namespace"]
-                    status = workload["status"]
-                    age = workload["age"]
-                    age_seconds = workload["age_seconds"]
-
+                if parent:
+                    workload["workload_type"] = parent["workload_type"]
                 items.append(workload)
-                cpu = cpu + workload["cpu"]
-                ram = ram + workload["ram"]
+                cpu += workload.get("cpu", 0)
+                ram += workload.get("ram", 0)
 
+            parent = sub_workload[0] if parent is None else parent
             grouped_workloads.append({
-                "workload_type": workload_type,
-                "user": user,
-                "full_name": full_name,
-                "show_full_name": show_full_name,
-                "project": project,
-                "name": name,
-                "namespace": namespace,
-                "id": id,
-                "status": status,
-                "age": age,
-                "age_seconds": age_seconds, 
-                "cpu": cpu,
-                "ram": ram,
-                "Resource Profile": f"{cpu} vCPU / {ram} GiB Memory",
+                **parent,
                 "has_sub_workload": True,
                 "sub_workload": items
             })
@@ -182,7 +175,7 @@ class WorkloadManager():
 
     def expand_sub_workloads(self):
         cached_data = self.valkey.get("cml_workloads")
-        workloads = json.loads(cached_data) if cached_data else []
+        workloads = json.loads(cached_data, object_hook=datetime_decoder) if cached_data else []
 
         expanded_workloads = []
         for workload in workloads:

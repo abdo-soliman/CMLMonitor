@@ -8,6 +8,7 @@ import argparse
 import pandas as pd
 from pathlib import Path
 from pprint import pprint
+from models import Config
 from extensions import app
 from utils import SearchFilters
 from smtp_utils import send_email

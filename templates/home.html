@@ -12,10 +12,12 @@
 <body>
     <nav class="navbar navbar-expand-lg fixed-top bg-white border-bottom">
         <div class="container-fluid">
+            <!-- 1. The Logo / Brand -->
             <a class="navbar-brand" href="/">
                 CML <span>MONITOR</span>
             </a>
 
+            <!-- 2. Left-aligned normal navigation links -->
             <ul class="navbar-nav me-auto ms-4 mb-2 mb-lg-0">
                 {% if user.is_admin %}
                 <li class="nav-item">
@@ -24,12 +26,14 @@
                 {% endif %}
             </ul>
 
+            <!-- 3. Right-aligned utilities (Gear icon & User dropdown) -->
             <div class="d-flex align-items-center">
                 {% if user.config_admin %}
                     <a href="/config" class="text-secondary me-4 text-decoration-none" title="Configuration" style="font-size: 1.25rem; transition: color 0.2s;" onmouseover="this.classList.remove('text-secondary'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-secondary');">
                         <i class="fa-solid fa-gear"></i>
                     </a>
                 {% endif %}
+                
                 <div class="nav-item dropdown user-dropdown-hover">
                     <div class="d-flex align-items-center user-dropdown-trigger" data-bs-toggle="dropdown">
                         <div class="bg-primary text-white rounded-circle d-flex justify-content-center align-items-center me-2" style="width: 36px; height: 36px; font-weight: 600; font-size: 16px; cursor: pointer;">
@@ -104,6 +108,13 @@
                         onclick="filterButtonClickHandler(WorkloadFilters.JOB, this)">
                         Jobs <span id="filter-jobs-count" class="badge bg-secondary">{{ num_jobs }}</span>
                     </button>
+                    <button
+                        id="filter-btn-orphans"
+                        type="button"
+                        class="btn btn-outline-secondary"
+                        onclick="filterButtonClickHandler(WorkloadFilters.ORPHAN, this)">
+                        Orphans <span id="filter-orphans-count" class="badge bg-secondary">{{ num_orphans | default(0) }}</span>
+                    </button>
                 </div>
 
                 <div class="d-flex">
@@ -141,7 +152,7 @@
 
                     <datalist id="search-data">
                         {% for username in usernames %}
-                            <option value={{ username }}>
+                            <option value="{{ username }}">
                         {% endfor %}
                     </datalist>
                 </div>
@@ -215,6 +226,7 @@
                                 <th>Workload Type</th>
                                 <th>User Details</th>
                                 <th>Project / Session</th>
+                                <th>Editor / Version</th>
                                 <th>Namespace / ID</th>
                                 <th>Status</th>
                                 <th id="ageColumnHeader" onclick="toggleSort('age', this)" data-order="none" style="cursor: pointer; user-select: none;">
@@ -245,14 +257,40 @@
                                     {% if workload.show_full_name %}<br><span style="color:#666666;">{{ workload.full_name }}</span>{% endif %}
                                 </td>
                                 <td>
-                                    <strong>{{ workload.project }}</strong><br>
-                                    <span style="color:#666666;">{{ workload.name }}</span>
+                                    <strong>{{ workload.project }}</strong>
+                                    {% if workload.workload_url %}
+                                        <a href="{{ workload.workload_url }}" target="_blank" class="ms-1 text-primary text-decoration-none" title="Open Workload">
+                                            <i class="fa-solid fa-arrow-up-right-from-square small"></i>
+                                        </a>
+                                    {% endif %}
+                                    <br>
+                                    <span style="color:#666666;">{% if workload.name %}{{ workload.name }}{% else %}<em class="text-muted small">N/A</em>{% endif %}</span>
                                 </td>
                                 <td>
-                                    <span style="color:#666666;">{{ workload.namespace }}</span><br>
+                                    {% if workload.editor_name or workload.editor_version %}
+                                        <span>{{ workload.editor_name or '' }}{% if workload.editor_name and workload.editor_version %}/{% endif %}{{ workload.editor_version or '' }}</span>
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <!-- IMPROVED NAMESPACE LINK -->
+                                    <a href="{{ workload.namespace_url }}" target="_blank" class="text-primary fw-semibold text-decoration-none" title="View in Kubernetes">
+                                        {{ workload.namespace }} <i class="fa-solid fa-arrow-up-right-from-square small ms-1"></i>
+                                    </a><br>
                                     <span class="badge-id text-muted small">{{ workload.id }}</span>
                                 </td>
-                                <td><span class="badge badge-schedule badge-schedule-{{ workload.status|lower }}">{{ workload.status }}</span></td>
+                                <td>
+                                    <!-- IMPROVED STATUS & REASON -->
+                                    <div class="d-flex align-items-center flex-wrap">
+                                        <span class="badge badge-schedule badge-schedule-{{ workload.status|lower }}">{{ workload.status }}</span>
+                                        {% if workload.reason %}
+                                            <span class="text-muted small ms-2" title="Reason: {{ workload.reason }}">
+                                                <i class="fa-solid fa-circle-info me-1"></i>{{ workload.reason }}
+                                            </span>
+                                        {% endif %}
+                                    </div>
+                                </td>
                                 <td>{{ workload.age }}</td>
                                 <td>{{ workload["Resource Profile"] }}</td>
                             </tr>
@@ -274,17 +312,45 @@
                                     </td>
                                     <td>
                                         <div class="ps-2">
-                                            {{ sub.project }}<br>
-                                            <span style="color:#888888;">{{ sub.name }}</span>
+                                            <strong>{{ sub.project }}</strong>
+                                            {% if sub.workload_url %}
+                                                <a href="{{ sub.workload_url }}" target="_blank" class="ms-1 text-primary text-decoration-none" title="Open Workload">
+                                                    <i class="fa-solid fa-arrow-up-right-from-square small"></i>
+                                                </a>
+                                            {% endif %}
+                                            <br>
+                                            <span style="color:#888888;">{% if sub.name %}{{ sub.name }}{% else %}<em class="text-muted small">N/A</em>{% endif %}</span>
                                         </div>
                                     </td>
                                     <td>
                                         <div class="ps-2">
-                                            <span style="color:#888888;">{{ sub.namespace }}</span><br>
+                                            {% if sub.editor_name or sub.editor_version %}
+                                                <span>{{ sub.editor_name or '' }}{% if sub.editor_name and sub.editor_version %}/{% endif %}{{ sub.editor_version or '' }}</span>
+                                            {% else %}
+                                                <span class="text-muted">-</span>
+                                            {% endif %}
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <!-- IMPROVED SUB-NAMESPACE LINK -->
+                                        <div class="ps-2">
+                                            <a href="{{ sub.namespace_url }}" target="_blank" class="text-primary fw-semibold text-decoration-none" title="View in Kubernetes">
+                                                {{ sub.namespace }} <i class="fa-solid fa-arrow-up-right-from-square small ms-1"></i>
+                                            </a><br>
                                             <span class="badge-id text-muted small">{{ sub.id }}</span>
                                         </div>
                                     </td>
-                                    <td><span class="badge badge-schedule badge-schedule-{{ sub.status|lower }}">{{ sub.status }}</span></td>
+                                    <td>
+                                        <!-- IMPROVED SUB-STATUS & REASON -->
+                                        <div class="d-flex align-items-center flex-wrap">
+                                            <span class="badge badge-schedule badge-schedule-{{ sub.status|lower }}">{{ sub.status }}</span>
+                                            {% if sub.reason %}
+                                                <span class="text-muted small ms-2" title="Reason: {{ sub.reason }}">
+                                                    <i class="fa-solid fa-circle-info me-1"></i>{{ sub.reason }}
+                                                </span>
+                                            {% endif %}
+                                        </div>
+                                    </td>
                                     <td>{{ sub.age }}</td>
                                     <td>{{ sub["Resource Profile"] }}</td>
                                 </tr>
@@ -302,7 +368,8 @@
                 </div>
             {% endif %}
 
-        {% endif %} </div>
+        {% endif %} 
+    </div>
 
     <footer class="app-footer">
         <div class="footer-content">
@@ -355,7 +422,8 @@
             ALL: "all",
             SESSION: "session",
             APPLICATION: "application",
-            JOB: "job"
+            JOB: "job",
+            ORPHAN: "orphan"
         });
 
         const SearchFilters = Object.freeze({
@@ -382,12 +450,11 @@
         let FILTER = WorkloadFilters.ALL;
         let CURRENT_PAGE = 1;
         
-        // These might come back undefined if cml_configured is False and the backend doesn't send them. 
-        // Adding basic fallbacks just in case.
         let MAX_PAGES = {{ max_pages | default(1) }};
         let NUM_SESSIONS = {{ num_sessions | default(0) }};
         let NUM_APPLICATIONS = {{ num_applications | default(0) }};
         let NUM_JOBS = {{ num_jobs | default(0) }};
+        let NUM_ORPHANS = {{ num_orphans | default(0) }};
         let TOTAL_WORKLOAD = {{ total_number_of_workload | default(0) }};
         let SEARCH_FILTER = SearchFilters.ALL;
         let SEARCH_FILTER_CHANGED = false;

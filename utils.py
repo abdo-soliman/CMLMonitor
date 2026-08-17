@@ -8,8 +8,22 @@ class WorkloadType(str, Enum):
     SESSION = "session"
     APPLICATION = "application"
     JOB = "job"
+    ORPHAN = "orphan"
     # MODEL = "model"
     # BATCH = "batch"
+
+
+class WorkloadStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    WAITING = "waiting"
+    SUCCEEDED = "succeeded"
+    TERMINATED = "terminated"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+
+    def __str__(self) -> str:
+        return self.value.capitalize()
 
 
 class SearchFilters(str, Enum):
@@ -148,7 +162,7 @@ def keep_only_arabic(string):
              has_arabic -> bool, True if string has arabic letters
     """
     # if no string provided return None
-    if string is None:
+    if not isinstance(string, str):
         return None, False
 
     # This pattern matches any character that is NOT in the Arabic Unicode range

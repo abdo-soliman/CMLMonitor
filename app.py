@@ -27,15 +27,16 @@ from flask import Flask, flash, render_template, request, redirect, url_for, jso
 
 
 app.secret_key = 'super_secret_key'  # Change this in production
+
 # Add this line to link migrations to your app and db
 migrate = Migrate(app, db, render_as_batch=True) 
-# Note: render_as_batch=True is highly recommended for SQLite!
 
 # --- Flask-Login Initialization ---
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 workload_manager = None
+APP_VERSION = "2.0"
 
 
 def init_workload_manager():
@@ -637,8 +638,10 @@ def home():
                         num_sessions=counts[WorkloadType.SESSION.value], \
                         num_applications=counts[WorkloadType.APPLICATION.value], \
                         num_jobs=counts[WorkloadType.JOB.value], \
+                        num_orphans=counts[WorkloadType.ORPHAN.value], \
                         total_number_of_workload=counts[WorkloadType.ALL.value], \
-                        max_pages=max_number_of_pages)
+                        max_pages=max_number_of_pages, \
+                        app_version=APP_VERSION)
 
 
 @app.route('/runtimes')
@@ -1029,6 +1032,7 @@ def refresh_data():
             "num_sessions": counts[WorkloadType.SESSION.value],
             "num_applications": counts[WorkloadType.APPLICATION.value],
             "num_jobs": counts[WorkloadType.JOB.value],
+            "num_orphans": counts[WorkloadType.ORPHAN.value],
             "payload": workloads[start_index:end_index]
         })
     except ValueError:
@@ -1078,6 +1082,7 @@ def get_data():
             "num_sessions": counts[WorkloadType.SESSION.value],
             "num_applications": counts[WorkloadType.APPLICATION.value],
             "num_jobs": counts[WorkloadType.JOB.value],
+            "num_orphans": counts[WorkloadType.ORPHAN.value],
             "payload": workloads[start_index:end_index]
         })
     except ValueError:

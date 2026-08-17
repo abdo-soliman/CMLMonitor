@@ -2,9 +2,9 @@ function renderTable(workloads) {
     const tbody = document.getElementById('table-body');
     let html = '';
         workloads.forEach(workload => {
-            sub_workload_toggle = `<span class="d-inline-block me-1" style="width: 20px;"></span>`;
+            let sub_workload_toggle = `<span class="d-inline-block me-1" style="width: 20px;"></span>`;
             if (workload.has_sub_workload) {
-                icon = (EXPANDED_ROWS.includes(workload.id)) ? `<i class="fa-solid fa-chevron-down fa-fw"></i>` : `<i class="fa-solid fa-chevron-right fa-fw"></i>`;
+                let icon = (EXPANDED_ROWS.includes(workload.id)) ? `<i class="fa-solid fa-chevron-down fa-fw"></i>` : `<i class="fa-solid fa-chevron-right fa-fw"></i>`;
                 sub_workload_toggle = `
                     <button class="btn btn-sm btn-link p-0 text-decoration-none text-dark me-1" onclick="toggleSubWorkload('${workload.id}', this)">
                         ${icon}
@@ -12,11 +12,28 @@ function renderTable(workloads) {
                 `;
             }
 
+            // Construct Editor / Version Text
+            const editorVersionHtml = (workload.editor_name || workload.editor_version) 
+                ? `<span>${workload.editor_name || ''}${(workload.editor_name && workload.editor_version) ? '/' : ''}${workload.editor_version || ''}</span>`
+                : `<span class="text-muted">-</span>`;
+
+            // Construct Workload URL Button
+            const workloadUrlHtml = workload.workload_url
+                ? `<a href="${workload.workload_url}" target="_blank" class="ms-1 text-primary text-decoration-none" title="Open Workload"><i class="fa-solid fa-arrow-up-right-from-square small"></i></a>`
+                : '';
+
+            // Construct Name (Handle Nulls)
+            const nameHtml = workload.name ? workload.name : `<em class="text-muted small">N/A</em>`;
+
+            // Construct Reason Text (Now side-by-side)
+            const reasonHtml = workload.reason 
+                ? `<span class="text-muted small ms-2" title="Reason: ${workload.reason}"><i class="fa-solid fa-circle-info me-1"></i>${workload.reason}</span>`
+                : '';
+
             html += `
                 <tr class="main-workload-row">
                     <td class="text-nowrap">
                         ${sub_workload_toggle}
-                        <!-- <input class="form-check-input row-checkbox align-middle" type="checkbox" value="{{ workload.id }}"> -->
                     </td>
                     <td>
                         <strong>${workload.workload_type}</strong>
@@ -26,23 +43,47 @@ function renderTable(workloads) {
                         ${workload.show_full_name ? `<br><span style="color:#666666;">${workload.full_name}</span>` : ''}
                     </td>
                     <td>
-                        <strong>${workload.project}</strong><br>
-                        <span style="color:#666666;">${workload.name}</span>
+                        <strong>${workload.project}</strong>${workloadUrlHtml}<br>
+                        <span style="color:#666666;">${nameHtml}</span>
                     </td>
                     <td>
-                        <span style="color:#666666;">${workload.namespace}</span><br>
+                        ${editorVersionHtml}
+                    </td>
+                    <td>
+                        <!-- IMPROVED NAMESPACE LINK -->
+                        <a href="${workload.namespace_url}" target="_blank" class="text-primary fw-semibold text-decoration-none" title="View in Kubernetes">${workload.namespace} <i class="fa-solid fa-arrow-up-right-from-square small ms-1"></i></a><br>
                         <span class="badge-id text-muted small">${workload.id}</span>
                     </td>
-                    <td><span class="badge badge-schedule badge-schedule-${workload.status.toLowerCase()}">${workload.status}</span></td>
+                    <td>
+                        <!-- IMPROVED STATUS & REASON -->
+                        <div class="d-flex align-items-center flex-wrap">
+                            <span class="badge badge-schedule badge-schedule-${workload.status.toLowerCase()}">${workload.status}</span>
+                            ${reasonHtml}
+                        </div>
+                    </td>
                     <td>${workload.age}</td>
                     <td>${workload["Resource Profile"]}</td>
                 </tr>
             `;
 
             if (workload.has_sub_workload) {
-                // display = (EXPANDED_ROWS.includes(workload.id)) ? "table-row" : "none";
                 for (const sub of workload.sub_workload) {
-                    fullname = sub.show_full_name ? `<br><span style="color:#888888;">${sub.full_name}</span>` : '';
+                    let fullname = sub.show_full_name ? `<br><span style="color:#888888;">${sub.full_name}</span>` : '';
+                    
+                    let subEditorVersionHtml = (sub.editor_name || sub.editor_version) 
+                        ? `<span>${sub.editor_name || ''}${(sub.editor_name && sub.editor_version) ? '/' : ''}${sub.editor_version || ''}</span>`
+                        : `<span class="text-muted">-</span>`;
+
+                    let subWorkloadUrlHtml = sub.workload_url
+                        ? `<a href="${sub.workload_url}" target="_blank" class="ms-1 text-primary text-decoration-none" title="Open Workload"><i class="fa-solid fa-arrow-up-right-from-square small"></i></a>`
+                        : '';
+
+                    let subNameHtml = sub.name ? sub.name : `<em class="text-muted small">N/A</em>`;
+                    
+                    let subReasonHtml = sub.reason 
+                        ? `<span class="text-muted small ms-2" title="Reason: ${sub.reason}"><i class="fa-solid fa-circle-info me-1"></i>${sub.reason}</span>`
+                        : '';
+
                     html += `
                         <tr class="sub-workload-row sub-workload-${workload.id}" style="display: ${EXPANDED_ROWS.includes(workload.id) ? "table-row" : "none"};">
                             <td>
@@ -59,17 +100,29 @@ function renderTable(workloads) {
                             </td>
                             <td>
                                 <div class="ps-2">
-                                    ${sub.project}<br>
-                                    <span style="color:#888888;">${sub.name}</span>
+                                    <strong>${sub.project}</strong>${subWorkloadUrlHtml}<br>
+                                    <span style="color:#888888;">${subNameHtml}</span>
                                 </div>
                             </td>
                             <td>
                                 <div class="ps-2">
-                                    <span style="color:#888888;">${sub.namespace}</span><br>
+                                    ${subEditorVersionHtml}
+                                </div>
+                            </td>
+                            <td>
+                                <div class="ps-2">
+                                    <!-- IMPROVED SUB-NAMESPACE LINK -->
+                                    <a href="${sub.namespace_url}" target="_blank" class="text-primary fw-semibold text-decoration-none" title="View in Kubernetes">${sub.namespace} <i class="fa-solid fa-arrow-up-right-from-square small ms-1"></i></a><br>
                                     <span class="badge-id text-muted small">${sub.id}</span>
                                 </div>
                             </td>
-                            <td><span class="badge badge-schedule badge-schedule-${sub.status.toLowerCase()}">${sub.status}</span></td>
+                            <td>
+                                <!-- IMPROVED SUB-STATUS & REASON -->
+                                <div class="d-flex align-items-center flex-wrap">
+                                    <span class="badge badge-schedule badge-schedule-${sub.status.toLowerCase()}">${sub.status}</span>
+                                    ${subReasonHtml}
+                                </div>
+                            </td>
                             <td>${sub.age}</td>
                             <td>${sub["Resource Profile"]}</td>
                         </tr>
@@ -83,11 +136,15 @@ function renderTable(workloads) {
 
 
 function updateDataList() {
-    data = (SEARCH_FILTER == SearchFilters.ALL) ? SEARCH_DATA[SearchFilters.USERNAME] : SEARCH_DATA[SEARCH_FILTER];
+    let data = (SEARCH_FILTER == SearchFilters.ALL) ? SEARCH_DATA[SearchFilters.USERNAME] : SEARCH_DATA[SEARCH_FILTER];
     let html = '';
-    data.forEach(item => {
-        html += `<option value="${item}">`;
-    });
+    
+    // Safety check in case the search filter array doesn't exist in SEARCH_DATA
+    if(data && Array.isArray(data)) {
+        data.forEach(item => {
+            html += `<option value="${item}">`;
+        });
+    }
 
     document.getElementById("search-data").innerHTML = html;
 }
@@ -147,13 +204,12 @@ function fetchData(direction = null, pageSize = null, filter = null, searchValue
     const filterChanged = isValidFilter && filter !== FILTER;
     let toBeFilter = (isValidFilter) ? filter : FILTER;
 
-    // const searchFilter = document.getElementById("search-filter").value;
     const isValidSearchFilter = Object.values(SearchFilters).includes(SEARCH_FILTER);
     let toBeSearchFilter = (isValidSearchFilter) ? SEARCH_FILTER : SearchFilters.ALL;
 
     let toBePageNumber = CURRENT_PAGE;
     if (filterChanged || direction === "first")
-        toBePageNumber = 1
+        toBePageNumber = 1;
     else if (direction === "previous")
         toBePageNumber = (toBePageNumber > 1) ? toBePageNumber-1 : 1;
     else if (direction === "next")
@@ -200,28 +256,28 @@ function fetchData(direction = null, pageSize = null, filter = null, searchValue
             NUM_SESSIONS = data.num_sessions;
             NUM_APPLICATIONS = data.num_applications;
             NUM_JOBS = data.num_jobs;
+            
+            // Allow graceful fallback if the backend hasn't been updated to emit this payload key yet
+            NUM_ORPHANS = data.num_orphans || 0; 
+            
             TOTAL_WORKLOAD = data.total_number_of_workload;
 
             updatePagination();
             updateFilter();
             updateSearch();
             updateSort();
-            console.log(">>>>>>>>>>>>>>>>>>>>>>>> HERE");
             renderTable(data.payload);
-            console.log(">>>>>>>>>>>>>>>>>>>>>>>> THERE");
         })
         .catch(error => console.error('Error fetching data:', error));
 }
 
 
 function refreshData() {
-    // 1. Get the modal elements and create Bootstrap instances
     const loadingModalEl = document.getElementById('loadingModal');
     const errorModalEl = document.getElementById('errorModal');
     const loadingModal = bootstrap.Modal.getOrCreateInstance(loadingModalEl);
     const errorModal = bootstrap.Modal.getOrCreateInstance(errorModalEl);
 
-    // 2. Show the loading modal before starting the fetch
     loadingModal.show();
 
     const baseUrl = `${window.location.href}api/refresh`;
@@ -241,7 +297,6 @@ function refreshData() {
 
     fetch(url)
         .then(response => {
-            // Check if the HTTP status is not 200-299
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
@@ -250,7 +305,6 @@ function refreshData() {
         .then(data => {
             MAX_PAGES = data.max_pages;
             CURRENT_PAGE = data.page_number;
-            // we are assuming server is always right
             PAGE_SIZE = data.page_size;
             FILTER = data.filter;
             SEARCH_FILTER = data.search_filter;
@@ -263,6 +317,7 @@ function refreshData() {
             NUM_SESSIONS = data.num_sessions;
             NUM_APPLICATIONS = data.num_applications;
             NUM_JOBS = data.num_jobs;
+            NUM_ORPHANS = data.num_orphans || 0;
             TOTAL_WORKLOAD = data.total_number_of_workload;
 
             updatePagination();
@@ -281,7 +336,6 @@ function refreshData() {
                     errorModal.show();
                 }, { once: true });
                 
-                // Now it is safe to hide
                 loadingModal.hide();
             }, 500);
         });
@@ -299,27 +353,24 @@ function filterButtonClickHandler(workloadType, btn) {
 function downloadReport() {
     fetch('/api/report')
     .then(response => {
-        if (response.ok) return response.blob(); // Convert to Blob (Binary Large Object)
+        if (response.ok) return response.blob(); 
         throw new Error('Network response was not ok.');
     })
     .then(blob => {
-        // 2. Create a temporary URL for the Blob
         const url = window.URL.createObjectURL(blob);
         
-        // 3. Create a hidden link and click it programmatically
         const a = document.createElement('a');
         a.style.display = 'none';
         a.href = url;
 
-        const date = new Date(); // Gets the current date and time
+        const date = new Date(); 
         const formattedDate = date.toISOString().split('T')[0];
-        a.download = `report_${formattedDate}.xlsx`; // Name the file here
+        a.download = `report_${formattedDate}.xlsx`; 
 
         document.body.appendChild(a);
         
-        a.click(); // Trigger the download
+        a.click(); 
         
-        // 4. Clean up
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
     })
@@ -328,38 +379,29 @@ function downloadReport() {
 
 
 function toggleSort(orderBy, headerElement) {
-    // 1. Check current state of the clicked column
     let currentOrder = headerElement.getAttribute('data-order');
     
-    // 2. Determine the new state 
-    // If it's currently ascending, make it descending. Otherwise, make it ascending.
     let newOrder = (currentOrder === 'asc') ? 'desc' : 'asc';
     let isDesc = (newOrder === 'desc');
 
-    // 3. Reset all sortable headers to their neutral state
     const allSortHeaders = document.querySelectorAll('th[data-order]');
     allSortHeaders.forEach(th => {
         th.setAttribute('data-order', 'none');
         const icon = th.querySelector('.sort-icon');
         if (icon) {
-            // Reset to the default bidirectional sort icon
             icon.className = 'fa-solid fa-sort text-muted sort-icon ms-1';
         }
     });
 
-    // 4. Apply the new state to the clicked header
     headerElement.setAttribute('data-order', newOrder);
     const activeIcon = headerElement.querySelector('.sort-icon');
     
     if (newOrder === 'asc') {
-        // Triangle pointing UP
         activeIcon.className = 'fa-solid fa-caret-up sort-icon ms-1'; 
     } else {
-        // Triangle pointing DOWN
         activeIcon.className = 'fa-solid fa-caret-down sort-icon ms-1';
     }
 
-    // 5. Call your data fetching function
     fetchData(null, null, null, null, orderBy, isDesc);
 }
 
@@ -398,7 +440,6 @@ function updateSort() {
 
 
 function toggleSubWorkload(workloadId, btnElement) {
-    // Select all sub-workload rows that belong to this workload ID
     const subRows = document.querySelectorAll('.sub-workload-' + workloadId);
     const icon = btnElement.querySelector('i');
 
@@ -418,26 +459,6 @@ function toggleSubWorkload(workloadId, btnElement) {
 
 
 document.addEventListener('DOMContentLoaded', function () {
-    // 1. SELECT ALL LOGIC
-    // const selectAllCheckbox = document.getElementById('selectAll');
-
-    // // Use event delegation for row checkboxes because they are dynamic (re-rendered by JS)
-    // document.getElementById('table-body').addEventListener('change', function(e) {
-    //     if(e.target.classList.contains('row-checkbox')) {
-    //         const allCheckboxes = document.querySelectorAll('.row-checkbox');
-    //         const allChecked = Array.from(allCheckboxes).every(c => c.checked);
-    //         selectAllCheckbox.checked = allChecked;
-    //     }
-    // });
-
-    // selectAllCheckbox.addEventListener('change', function () {
-    //     const rowCheckboxes = document.querySelectorAll('.row-checkbox');
-    //     rowCheckboxes.forEach(checkbox => {
-    //         checkbox.checked = selectAllCheckbox.checked;
-    //     });
-    // });
-
-    // Select the element
     const pageSizeDropdownMenu = document.getElementById('page-size-dropdown');
     pageSizeDropdownMenu.addEventListener('change', (event) => {
         const selectedValue = Number.parseInt(event.target.value, 10);
@@ -476,7 +497,7 @@ function updatePagination() {
         nextPageButton.classList.add("disabled");
     }
 
-    if (MAX_PAGES == 1) {
+    if (MAX_PAGES <= 1) {
         firstPageButton.classList.add("disabled");
         previousPageButton.classList.add("disabled");
         lastPageButton.classList.add("disabled");
@@ -490,21 +511,28 @@ function updateFilter() {
     const filterButtonSessions = document.getElementById('filter-btn-sessions');
     const filterButtonApplications = document.getElementById('filter-btn-applications');
     const filterButtonJobs = document.getElementById('filter-btn-jobs');
+    const filterButtonOrphans = document.getElementById('filter-btn-orphans');
 
     const filterAllCount = document.getElementById("filter-all-count");
     const filterSessionsCount = document.getElementById("filter-sessions-count");
     const filterApplicationsCount = document.getElementById("filter-applications-count");
     const filterJobsCount = document.getElementById("filter-jobs-count");
+    const filterOrphansCount = document.getElementById("filter-orphans-count");
 
+    // Reset styles
     filterButtonAll.classList.value = "btn btn-outline-secondary";
     filterButtonSessions.classList.value = "btn btn-outline-secondary";
     filterButtonApplications.classList.value = "btn btn-outline-secondary";
     filterButtonJobs.classList.value = "btn btn-outline-secondary";
+    filterButtonOrphans.classList.value = "btn btn-outline-secondary";
+    
     filterAllCount.classList.value = "badge bg-secondary";
     filterSessionsCount.classList.value = "badge bg-secondary";
     filterApplicationsCount.classList.value = "badge bg-secondary";
     filterJobsCount.classList.value = "badge bg-secondary";
+    filterOrphansCount.classList.value = "badge bg-secondary";
 
+    // Apply active styles
     if (FILTER === WorkloadFilters.SESSION) {
         filterButtonSessions.classList.value = "btn btn-primary active";
         filterSessionsCount.classList.value = "badge";
@@ -517,15 +545,21 @@ function updateFilter() {
         filterButtonJobs.classList.value = "btn btn-primary active";
         filterJobsCount.classList.value = "badge";
     }
+    else if (FILTER === WorkloadFilters.ORPHAN) {
+        filterButtonOrphans.classList.value = "btn btn-primary active";
+        filterOrphansCount.classList.value = "badge";
+    }
     else {
         filterButtonAll.classList.value = "btn btn-primary active";
         filterAllCount.classList.value = "badge";
     }
 
+    // Update counts
     filterAllCount.textContent = TOTAL_WORKLOAD;
     filterSessionsCount.textContent = NUM_SESSIONS;
     filterApplicationsCount.textContent = NUM_APPLICATIONS;
     filterJobsCount.textContent = NUM_JOBS;
+    if (filterOrphansCount) filterOrphansCount.textContent = NUM_ORPHANS;
 }
 
 
