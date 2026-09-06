@@ -16,10 +16,10 @@ from pydantic import ValidationError
 from cmlmonitor_db import init_configs
 from smtp_utils import smtp_test_email
 from models import User, Config, Runtime
+from cmlapi_manager import CMLAPIManager
 from workload_manager import WorkloadManager
 from werkzeug.security import check_password_hash, generate_password_hash
 from schemas import AdminSchema, SetupSchema, LDAPSchema, CMLSchema, AlertsSchema
-from cmlmonitor import check_cml_connection, is_cml_apikey_admin, test_kube_config
 from ldap_utils import is_ldap_enabled, authenticate_and_user_data, validate_ldap_search
 from flask_login import LoginManager, login_user, login_required, current_user, logout_user
 from utils import WorkloadType, SearchFilters, OrderByFilters, pagination_to_indecies, is_none_or_empty
@@ -35,6 +35,7 @@ migrate = Migrate(app, db, render_as_batch=True)
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
+cmlapi_manager = CMLAPIManager()
 workload_manager = None
 APP_VERSION = "2.0"
 
@@ -366,10 +367,10 @@ def test_setup_cml_connection():
         return jsonify({"success": False, "message": "Kubeconfig file content is missing."})
 
     # Test CML Connection
-    connected, message = check_cml_connection(domain, api_key)
+    connected, message = cmlapi_manager.check_cml_connection(domain, api_key)
     if connected:
         # Test that the API Key is for an admin user.
-        if is_cml_apikey_admin(domain, api_key):
+        if cmlapi_manager.is_cml_apikey_admin(domain, api_key):
             tmp_path = None
             try:
                 # Create a temporary file in /tmp to write rke3.yaml to it for testing
@@ -378,7 +379,7 @@ def test_setup_cml_connection():
                     tmp_path = tmp_file.name
 
                 # Test the kubenetes connection using the uploaded yaml file
-                kube_connected, kube_message = test_kube_config(tmp_path)
+                kube_connected, kube_message = cmlapi_manager.test_kube_config(tmp_path)
 
                 if kube_connected:
                     return jsonify({"success": True, "message": "CML and Kubernetes were configured successfully!"})
@@ -411,10 +412,10 @@ def test_config_cml_connection():
     kube_content = data.get('cml_kubeconfig_content')
 
     # Test CML Connection
-    connected, message = check_cml_connection(domain, api_key)
+    connected, message = cmlapi_manager.check_cml_connection(domain, api_key)
     if connected:
         # Test that the API Key is for an admin user.
-        if is_cml_apikey_admin(domain, api_key):
+        if cmlapi_manager.is_cml_apikey_admin(domain, api_key):
             if not kube_content:
                 # SKIP K8s TEST
                 return jsonify({"success": True, "message": "CML configured successfully (Kubernetes test skipped as no new file was provided)."})
@@ -427,7 +428,7 @@ def test_config_cml_connection():
                         tmp_path = tmp_file.name
 
                     # Test the kubenetes connection using the uploaded yaml file
-                    kube_connected, kube_message = test_kube_config(tmp_path)
+                    kube_connected, kube_message = cmlapi_manager.test_kube_config(tmp_path)
 
                     if kube_connected:
                         return jsonify({"success": True, "message": "CML and Kubernetes were configured successfully!"})

@@ -19,6 +19,13 @@ from utils import SearchFilters, WorkloadStatus, seconds_to_age, age_dict_tostri
 
 
 class CMLAPIManager:
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     def  __init__(self):
         self.POD_CLUSTERING_WINDOW_SIZE = int(os.getenv("POD_CLUSTERING_WINDOW_SIZE", 120))
         with app.app_context():
@@ -241,7 +248,7 @@ class CMLAPIManager:
         except ApiException as e:
             logging.error(f"Exception when calling CoreV1Api->list_pod_for_all_namespaces:{e}\n")
 
-    def get_running_sessions(self, start, end, zombies_only=False):
+    def get_running_sessions(self, start, end):
         logging.info("Connecting to CML API...")
 
         sort = 'created_at'
@@ -249,11 +256,7 @@ class CMLAPIManager:
         time_range_search_filter = "{\"created_time\":{\"min\":\"" + start + "\",\"max\":\"" + end + "\"}}"
         try:
             logging.info(f"Getting Usage Stats for all running Sessions between: {start} and {end}")
-            if zombies_only:
-                search_filter = "{\"workload_type\":\"session\",\"status\":\"running\"}"
-                api_response = self.cml_client.list_usage(search_filter=search_filter, sort=sort, page_size=page_size, time_range_search_filter=time_range_search_filter)
-            else:
-                api_response = self.cml_client.list_usage(sort=sort, page_size=page_size, time_range_search_filter=time_range_search_filter)
+            api_response = self.cml_client.list_usage(sort=sort, page_size=page_size, time_range_search_filter=time_range_search_filter)
 
             response = api_response.to_dict()
             return response["usage_response"]
@@ -337,12 +340,14 @@ class CMLAPIManager:
 
         all_cml_usage_data = []
         for (start_str, end_str), pods_in_window in pod_clusters.items():
-            cml_data = self.get_running_sessions(start_str, end_str, zombies_only=zombies_only)
+            cml_data = self.get_running_sessions(start_str, end_str)
 
             if cml_data:
                 all_cml_usage_data.extend(cml_data)
 
         workloads = self.match_pods_with_cml_workload(pods, all_cml_usage_data)
+        if zombies_only:
+            workloads = [workload for workload in workloads if workload["workload_type"] == "session" or workload["workload_type"] == "orphan"]
 
         search_data = {
             SearchFilters.ALL.value: set(),

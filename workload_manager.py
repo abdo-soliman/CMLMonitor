@@ -165,6 +165,10 @@ class WorkloadManager():
                 ram += workload.get("ram", 0)
 
             parent = sub_workload[0] if parent is None else parent
+            cpu = int(cpu) if cpu >= 1 else cpu
+            parent["cpu"] = cpu
+            parent["ram"] = ram
+            parent["Resource Profile"] = f"{cpu} vCPU / {ram} GiB Memory"
             grouped_workloads.append({
                 **parent,
                 "has_sub_workload": True,

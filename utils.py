@@ -134,22 +134,22 @@ def seconds_to_age(seconds):
     return age_dict
 
 
-def age_dict_tostring(age_dict):
-    """
-    takes an age_dict {'d': days, 'h': hours, 'm': minutes, 's': seconds }
-    concatenates it into age string [0-9]d[0-9]h[0-9]m[0-9]s
+def age_dict_tostring(age_dict, round=2):
+    if round < 1 or round > 4:
+        raise ValueError("you can only round age to 1, 2, 3, or 4")
 
-    Params: age_dict -> dict, {'d': days, 'h': hours, 'm': minutes, 's': seconds }
-    Returns: age -> str, [0-9]d[0-9]h[0-9]m[0-9]s
-    """
-    age_string = ""
+    # Order of units from largest to smallest
+    units = ["d", "h", "m", "s"]
+    parts = []
 
-    age_string = age_string + f"{age_dict['d']}d" if age_dict["d"] > 0 else age_string
-    age_string = age_string + f"{age_dict['h']}h" if age_dict["h"] > 0 else age_string
-    age_string = age_string + f"{age_dict['m']}m" if age_dict["m"] > 0 else age_string
-    age_string = age_string + f"{age_dict['s']}s" if age_dict["s"] > 0 else age_string
+    for unit in units:
+        val = age_dict.get(unit, 0)
+        if val > 0:
+            parts.append(f"{val}{unit}")
+            if len(parts) == round:
+                break
 
-    return age_string
+    return "".join(parts)
 
 
 def keep_only_arabic(string):

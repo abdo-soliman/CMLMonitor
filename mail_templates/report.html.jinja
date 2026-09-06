@@ -92,20 +92,26 @@
                                     <tr>
                                         <td style="padding: 12px; border-bottom: 1px solid #eeeeee;"><span class="category-icon" style="color: #326ce5; font-weight: bold;">Sessions</span></td>
                                         <td style="padding: 12px; border-bottom: 1px solid #eeeeee;">{{ sessions.count }}</td>
-                                        <td style="padding: 12px; border-bottom: 1px solid #eeeeee;">{{ sessions.total_cpu }}</td>
-                                        <td style="padding: 12px; border-bottom: 1px solid #eeeeee;">{{ sessions.total_ram }}</td>
+                                        <td style="padding: 12px; border-bottom: 1px solid #eeeeee;">{{ sessions.total_cpu }} vCPU</td>
+                                        <td style="padding: 12px; border-bottom: 1px solid #eeeeee;">{{ sessions.total_ram }} GiB</td>
                                     </tr>
                                     <tr>
                                         <td style="padding: 12px; border-bottom: 1px solid #eeeeee;"><span class="category-icon" style="color: #326ce5; font-weight: bold;">Applications</span></td>
                                         <td style="padding: 12px; border-bottom: 1px solid #eeeeee;">{{ apps.count }}</td>
-                                        <td style="padding: 12px; border-bottom: 1px solid #eeeeee;">{{ apps.total_cpu }}</td>
-                                        <td style="padding: 12px; border-bottom: 1px solid #eeeeee;">{{ apps.total_ram }}</td>
+                                        <td style="padding: 12px; border-bottom: 1px solid #eeeeee;">{{ apps.total_cpu }} vCPU</td>
+                                        <td style="padding: 12px; border-bottom: 1px solid #eeeeee;">{{ apps.total_ram }} GiB</td>
                                     </tr>
                                     <tr>
                                         <td style="padding: 12px; border-bottom: 1px solid #eeeeee;"><span class="category-icon" style="color: #326ce5; font-weight: bold;">Jobs</span></td>
                                         <td style="padding: 12px; border-bottom: 1px solid #eeeeee;">{{ jobs.count }}</td>
-                                        <td style="padding: 12px; border-bottom: 1px solid #eeeeee;">{{ jobs.total_cpu }}</td>
-                                        <td style="padding: 12px; border-bottom: 1px solid #eeeeee;">{{ jobs.total_ram }}</td>
+                                        <td style="padding: 12px; border-bottom: 1px solid #eeeeee;">{{ jobs.total_cpu }} vCPU</td>
+                                        <td style="padding: 12px; border-bottom: 1px solid #eeeeee;">{{ jobs.total_ram }} GiB</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 12px; border-bottom: 1px solid #eeeeee;"><span class="category-icon" style="color: #326ce5; font-weight: bold;">Orphans</span></td>
+                                        <td style="padding: 12px; border-bottom: 1px solid #eeeeee;">{{ orphans.count }}</td>
+                                        <td style="padding: 12px; border-bottom: 1px solid #eeeeee;">{{ orphans.total_cpu }} vCPU</td>
+                                        <td style="padding: 12px; border-bottom: 1px solid #eeeeee;">{{ orphans.total_ram }} GiB</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -116,7 +122,7 @@
 
                     <tr>
                         <td class="footer" bgcolor="#fcfcfc" align="center" style="padding: 20px; color: #888888; font-size: 12px;">
-                            Automated Governance Service • Kubemonitor • {{ datetime }}
+                            Automated Governance Service • CMLMonitor • {{ datetime }}
                         </td>
                     </tr>
                 </table>

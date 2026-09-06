@@ -12,7 +12,8 @@ PID_FILES = {
     'alert': os.path.join(APP_STATE_DIR, 'alert.pid'),
     'report': os.path.join(APP_STATE_DIR, 'report.pid')
 }
-SCRIPT_PATH = "cmlmonitor.py"
+
+SCRIPT_PATH = "alerts_manager.py"
 
 
 def get_running_process(process_type):
