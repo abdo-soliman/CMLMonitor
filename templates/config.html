@@ -17,6 +17,18 @@
                 CML <span>MONITOR</span>
             </a>
 
+            <!-- 2. Left-aligned normal navigation links -->
+            <ul class="navbar-nav me-auto ms-4 mb-2 mb-lg-0">
+                {% if user.is_admin %}
+                <li class="nav-item">
+                    <a class="nav-link" href="/runtimes">Runtimes</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/stats">Stats</a>
+                </li>
+                {% endif %}
+            </ul>
+
             <div class="d-flex align-items-center">
                 <div class="nav-item dropdown user-dropdown-hover">
                     <div class="d-flex align-items-center user-dropdown-trigger" style="cursor: pointer;" data-bs-toggle="dropdown">

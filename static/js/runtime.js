@@ -145,3 +145,25 @@ function changePageSize(size) {
     currentSize = parseInt(size);
     fetchData(1); // Reset to page 1 on page size change
 }
+
+function syncRuntimes() {
+    const loadingModal = new bootstrap.Modal(document.getElementById('loadingModal'));
+    document.getElementById('loadingModalText').innerText = "Syncing from CML...";
+    loadingModal.show();
+
+    fetch('/api/runtimes/sync', { method: 'POST' })
+    .then(response => response.json())
+    .then(data => {
+        loadingModal.hide();
+        if (data.success) {
+            if (typeof fetchData === "function") fetchData(); // Reload table seamlessly
+        } else {
+            alert("Error: " + data.message);
+        }
+        loadingModal.hide();
+    })
+    .catch(err => {
+        loadingModal.hide();
+        alert("Failed to connect to the server.");
+    });
+}

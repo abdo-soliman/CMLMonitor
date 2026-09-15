@@ -157,6 +157,12 @@ class WorkloadManager():
             ram = 0
             items = []
             parent = next((w for w in sub_workload if w["role"] != "spark-executor"), None)
+            if parent is not None:
+                cpu = parent["cpu"]
+                ram = parent["ram"]
+                items.append(parent.copy())
+                sub_workload.remove(parent)
+
             for workload in sub_workload:
                 if parent:
                     workload["workload_type"] = parent["workload_type"]
@@ -191,3 +197,16 @@ class WorkloadManager():
 
         expanded_workloads = sorted(expanded_workloads, key=lambda x: (-x['age_seconds'], x['id'], -x['ram']))
         return expanded_workloads
+
+    def cache_node_utilization(self):
+        """Queries worker node metrics and saves them into Valkey."""
+        try:
+            node_stats = self.cmlapi_manager.get_worker_node_utilization()
+            self.valkey.set("cml_node_utilization", json.dumps(node_stats))
+        except Exception as e:
+            logging.error(f"Error caching node utilization: {e}")
+
+    def get_node_utilization(self):
+        """Reads worker node metrics from Valkey."""
+        cached_data = self.valkey.get("cml_node_utilization")
+        return json.loads(cached_data) if cached_data else []

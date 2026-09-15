@@ -23,6 +23,9 @@
                 <li class="nav-item">
                     <a class="nav-link" href="/runtimes">Runtimes</a>
                 </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/stats">Stats</a>
+                </li>
                 {% endif %}
             </ul>
 
@@ -61,11 +64,13 @@
     </nav>
 
     <div class="main-content">
+        {% if user.config_admin %}
         <div style="display: flex; justify-content: right; align-items: center; margin-bottom: 25px;">
-            <button class="d-flex btn btn-primary btn-sm" style="height: 35px" onclick="fetchData()">
-                Refresh Table
+            <button class="d-flex btn btn-outline-secondary btn-sm me-2" style="height: 35px" onclick="syncRuntimes()">
+                <i class="fa-solid fa-rotate me-2 mt-1"></i> Sync from CML
             </button>
         </div>
+        {% endif %}
 
         <div class="actions-container d-flex justify-content-between mb-3">
             <!-- Hide Disabled Toggle -->
@@ -130,6 +135,18 @@
             <i class="fa-solid fa-layer-group text-secondary mb-3" style="font-size: 3rem;"></i>
             <h5 class="text-secondary mb-2">No Runtimes Found</h5>
             <p class="text-muted mb-0">There are currently no runtimes tracked in the system.</p>
+        </div>
+    </div>
+
+    <!-- Loading Modal -->
+    <div class="modal fade" id="loadingModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-sm">
+            <div class="modal-content">
+                <div class="modal-body text-center p-4">
+                    <div class="spinner-border text-primary mb-3" role="status"></div>
+                    <h6 class="mb-0" id="loadingModalText">Refreshing Data...</h6>
+                </div>
+            </div>
         </div>
     </div>
 

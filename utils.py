@@ -206,3 +206,35 @@ def pagination_to_indecies(page_size, page_number, total_size):
     end_index = start_index + page_size
 
     return start_index, end_index, page_number, page_size, max_number_of_pages
+
+
+# Add this helper function at the top or inside cmlapi_manager.py
+def parse_quantity(quantity_str) -> float:
+    """Parses Kubernetes resource quantity strings into standard numerical base units."""
+    if isinstance(quantity_str, (int, float)):
+        return float(quantity_str)
+    
+    if quantity_str.endswith("n"):
+        return float(quantity_str[:-1]) / 1e9
+    elif quantity_str.endswith("u"):
+        return float(quantity_str[:-1]) / 1e6
+    elif quantity_str.endswith("m"):
+        return float(quantity_str[:-1]) / 1000.0
+    elif quantity_str.endswith("Ki"):
+        return float(quantity_str[:-2]) * 1024
+    elif quantity_str.endswith("K"):
+        return float(quantity_str[:-1]) * 1024
+    elif quantity_str.endswith("Mi"):
+        return float(quantity_str[:-2]) * (1024 ** 2)
+    elif quantity_str.endswith("M"):
+        return float(quantity_str[:-1]) * (1024 ** 2)
+    elif quantity_str.endswith("Gi"):
+        return float(quantity_str[:-2]) * (1024 ** 3)
+    elif quantity_str.endswith("G"):
+        return float(quantity_str[:-1]) * (1024 ** 3)
+    elif quantity_str.endswith("Ti"):
+        return float(quantity_str[:-2]) * (1024 ** 4)
+    elif quantity_str.endswith("T"):
+        return float(quantity_str[:-1]) * (1024 ** 4)
+    else:
+        return float(quantity_str)

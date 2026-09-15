@@ -40,6 +40,32 @@ workload_manager = None
 APP_VERSION = "2.0"
 
 
+def runtime_sync_daemon(app_context):
+    """Background loop that forces a runtime sync every 24 hours."""
+    import time
+    with app_context:
+        while True:
+            try:
+                cmlapi_manager.sync_runtimes()
+            except Exception as e:
+                pass
+            time.sleep(86400)  # 24 hours
+
+
+# --- Background Daemon for Stats Polling ---
+def node_stats_daemon(app_context):
+    """Background loop polling node utilization every 3 seconds."""
+    import time
+    with app_context:
+        while True:
+            try:
+                if workload_manager:
+                    workload_manager.cache_node_utilization()
+            except Exception as e:
+                pass
+            time.sleep(3)
+
+
 def init_workload_manager():
     """Helper function to instantiate and start the global workload manager."""
     global workload_manager
@@ -47,6 +73,15 @@ def init_workload_manager():
         # Import here if needed to avoid circular imports, or assume it's imported at the top
         workload_manager = WorkloadManager()
         print("Workload Manager initialized and caching started.")
+
+        # Start the daily runtime sync thread
+        app_context = app.app_context()
+        t = threading.Thread(target=runtime_sync_daemon, args=(app_context,), daemon=True)
+        t.start()
+
+        # Worker node utilization live monitoring thread (3-second frequency)
+        t_stats = threading.Thread(target=node_stats_daemon, args=(app_context,), daemon=True)
+        t_stats.start()
 
 
 def is_cml_configed():
@@ -1111,6 +1146,50 @@ def download_excel():
         download_name=f"report.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+
+@app.route('/api/runtimes/sync', methods=['POST'])
+@login_required
+def api_sync_runtimes():
+    if not current_user.is_admin:
+        return jsonify({"error": "Unauthorized"}), 403
+    
+    success = cmlapi_manager.sync_runtimes()
+    if success:
+        return jsonify({"success": True, "message": "Runtimes synced successfully."})
+    else:
+        return jsonify({"success": False, "message": "Failed to sync runtimes."}), 500
+
+
+# --- Stats Page Routes ---
+@app.route('/stats')
+@login_required
+def stats_page():
+    if not current_user or current_user.is_anonymous:
+        return redirect(url_for('login'))
+
+    if not current_user.is_admin:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    user = {
+        "username": current_user.username,
+        "fullname": current_user.fullname,
+        "mail": current_user.mail,
+        "is_admin": current_user.is_admin,
+        "config_admin": current_user.config_admin
+    }
+
+    return render_template('stats.html', user=user, app_version=APP_VERSION)
+
+
+@app.route('/api/stats/utilization')
+@login_required
+def api_node_utilization():
+    if not current_user.is_admin:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = workload_manager.get_node_utilization() if workload_manager else []
+    return jsonify({"nodes": data})
 
 
 if __name__ == '__main__':

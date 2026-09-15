@@ -6,16 +6,16 @@ import urllib3
 import logging
 import posixpath
 import pandas as pd
-from extensions import app
+from extensions import db, app
 from urllib.parse import quote
-from models import Runtime, Config
 from collections import defaultdict
 from kubernetes import client, config
+from models import Runtime, Config, User
 from ldap_utils import get_user_full_name
 from kubernetes.utils import parse_quantity
 from kubernetes.client.rest import ApiException
 from datetime import datetime, timezone, timedelta
-from utils import SearchFilters, WorkloadStatus, seconds_to_age, age_dict_tostring, keep_only_arabic
+from utils import SearchFilters, WorkloadStatus, seconds_to_age, age_dict_tostring, keep_only_arabic, parse_quantity
 
 
 class CMLAPIManager:
@@ -375,6 +375,153 @@ class CMLAPIManager:
 
         search_data = {k: list(v) for k, v in search_data.items()}
         return workloads, search_data
+
+    def sync_runtimes(self):
+        """Fetches runtimes from CML API and updates the local database."""
+        logging.info("Starting runtimes sync from CML API...")
+        try:
+            response = self.cml_client.list_runtimes(page_size=1000)
+            data = response.to_dict().get("runtimes", [])
+            users_map = {0: "system"}
+            
+            with app.app_context():
+                # Get existing DB users to prevent FK constraint violations
+                valid_db_usernames = {u.username for u in User.query.all()}
+                
+                for rt_data in data:
+                    user_id = rt_data.get("register_user_id")
+                    if user_id not in users_map:
+                        try:
+                            u_resp = self.cml_client.get_short_user_by_id(user_id)
+                            users_map[user_id] = u_resp.to_dict().get("username", "unknown")
+                        except Exception:
+                            users_map[user_id] = "unknown"
+                    
+                    cml_username = users_map[user_id]
+                    # Map to None if the CML user isn't locally registered to avoid FK errors
+                    added_by = cml_username if cml_username in valid_db_usernames else None
+                    
+                    image = rt_data.get("image_identifier")
+                    editor_name = rt_data.get("editor")
+                    editor_version = rt_data.get("edition")
+                    status = str(rt_data.get("status", "ENABLED")).upper()
+                    if status not in ["ENABLED", "DISABLED"]:
+                        status = "ENABLED"
+                    
+                    # Update if exists, Insert if new
+                    db_runtime = Runtime.query.filter_by(image=image).first()
+                    if db_runtime:
+                        db_runtime.editor_name = editor_name
+                        db_runtime.editor_version = editor_version
+                        db_runtime.status = status
+                        db_runtime.added_by = added_by
+                    else:
+                        new_runtime = Runtime(
+                            image=image,
+                            editor_name=editor_name,
+                            editor_version=editor_version,
+                            status=status,
+                            added_by=added_by
+                        )
+                        db.session.add(new_runtime)
+                
+                db.session.commit()
+                logging.info("Successfully synced runtimes from CML API.")
+                return True
+        except Exception as e:
+            logging.error(f"Failed to sync runtimes: {e}")
+            return False
+
+    def get_worker_node_utilization(self):
+        """
+        Calculates CPU and RAM utilization for worker nodes based on container requests.
+        Excludes master and control-plane nodes.
+        """
+        try:
+            config.load_kube_config(config_file=self.KUBECONFIG_PATH)
+            nodes = self.v1.list_node().items
+            node_data = {}
+
+            # 1. Identify Worker Nodes and record total capacity
+            for node in nodes:
+                labels = node.metadata.labels or {}
+                
+                # Exclude Master / Control-Plane / ETCD nodes
+                is_master = any(
+                    key in labels 
+                    for key in ["node-role.kubernetes.io/master", "node-role.kubernetes.io/control-plane", "node-role.kubernetes.io/etcd"]
+                )
+                if is_master:
+                    continue
+
+                name = node.metadata.name
+                cpu_cap = parse_quantity(node.status.capacity.get("cpu", 0))
+                mem_cap = parse_quantity(node.status.capacity.get("memory", 0))
+
+                node_data[name] = {
+                    "cpu_cap": cpu_cap,
+                    "mem_cap": mem_cap,
+                    "cpu_req": 0.0,
+                    "mem_req": 0.0
+                }
+
+            # 2. Sum resource requests for active pods running on worker nodes
+            pods = self.v1.list_pod_for_all_namespaces().items
+            for pod in pods:
+                node_name = pod.spec.node_name
+                if not node_name or node_name not in node_data:
+                    continue
+                if pod.status.phase in ["Succeeded", "Failed"]:
+                    continue
+
+                for container in pod.spec.containers:
+                    requests = container.resources.requests or {}
+                    if "cpu" in requests:
+                        node_data[node_name]["cpu_req"] += parse_quantity(requests["cpu"])
+                    if "memory" in requests:
+                        node_data[node_name]["mem_req"] += parse_quantity(requests["memory"])
+
+            # 3. Format metrics per worker node
+            result = []
+            for node_name, data in node_data.items():
+                cpu_req = data["cpu_req"]
+                cpu_cap = data["cpu_cap"]
+                cpu_pct = (cpu_req / cpu_cap * 100) if cpu_cap > 0 else 0.0
+
+                mem_req_gi = data["mem_req"] / (1024 ** 3)
+                mem_cap_gi = data["mem_cap"] / (1024 ** 3)
+                mem_pct = (mem_req_gi / mem_cap_gi * 100) if mem_cap_gi > 0 else 0.0
+
+                def resolve_color(pct):
+                    if pct < 75.0:
+                        return "#007bff" # Blue
+                    elif pct <= 90.0:
+                        return "#ffc107" # Yellow
+                    else:
+                        return "#dc3545" # Red
+
+                result.append({
+                    "node_name": node_name,
+                    "cpu": {
+                        "req": round(cpu_req, 2),
+                        "cap": round(cpu_cap, 2),
+                        "pct": round(cpu_pct, 2),
+                        "formatted": f"{cpu_req:.2f}/{cpu_cap:.2f}",
+                        "color": resolve_color(cpu_pct)
+                    },
+                    "ram": {
+                        "req_gi": round(mem_req_gi, 2),
+                        "cap_gi": round(mem_cap_gi, 2),
+                        "pct": round(mem_pct, 2),
+                        "formatted": f"{mem_req_gi:.2f}/{mem_cap_gi:.2f}",
+                        "color": resolve_color(mem_pct)
+                    }
+                })
+
+            return sorted(result, key=lambda x: x["node_name"])
+        except Exception as e:
+            logging.error(f"Error calculating node utilization: {e}")
+            return []
 
 if __name__ == "__main__":
     cmlapi_manager = CMLAPIManager()
