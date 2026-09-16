@@ -20,10 +20,10 @@ from cmlapi_manager import CMLAPIManager
 from workload_manager import WorkloadManager
 from werkzeug.security import check_password_hash, generate_password_hash
 from schemas import AdminSchema, SetupSchema, LDAPSchema, CMLSchema, AlertsSchema
-from ldap_utils import is_ldap_enabled, authenticate_and_user_data, validate_ldap_search
 from flask_login import LoginManager, login_user, login_required, current_user, logout_user
-from utils import WorkloadType, SearchFilters, OrderByFilters, pagination_to_indecies, is_none_or_empty
+from ldap_utils import is_ldap_enabled, authenticate_and_user_data, validate_ldap_search, search_ldap_user
 from flask import Flask, flash, render_template, request, redirect, url_for, jsonify, send_file, current_app
+from utils import WorkloadType, SearchFilters, OrderByFilters, pagination_to_indecies, is_none_or_empty, keep_only_arabic
 
 
 app.secret_key = 'super_secret_key'  # Change this in production
@@ -334,6 +334,7 @@ def login():
         else:
             # 3. User does NOT exist in DB: Attempt LDAP Authentication
             user_data = authenticate_and_user_data(username, password)
+            fullname, _ = keep_only_arabic(user_data.get('displayName'))
 
             if user_data is not None:
                 # LDAP Success! Auto-provision the user in the SQLite database
@@ -341,7 +342,7 @@ def login():
                     username=username,
                     password=None,               # Set to NULL
                     mail=user_data.get('mail'),
-                    fullname=user_data.get('displayName'),
+                    fullname=fullname,
                     is_external=True,            # Mark as LDAP user
                     is_admin=False,              # Always false by default
                     config_admin=False
@@ -1019,6 +1020,240 @@ def update_alerts():
         flash(f"An error occurred while saving: {str(e)}", "error")
 
     return redirect(url_for('config', active_tab="alerts"))
+
+
+@app.route('/api/users', methods=['GET'])
+@login_required
+def api_get_users():
+    if not current_user.config_admin:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('size', 25, type=int)
+    search_value = request.args.get('search', '', type=str).strip().lower()
+
+    query = User.query
+
+    if search_value:
+        query = query.filter(User.username.ilike(f"%{search_value}%"))
+
+    query = query.order_by(User.username.asc())
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
+    all_usernames = [u.username for u in User.query.order_by(User.username.asc()).all()]
+
+    users_payload = []
+    for u in pagination.items:
+        users_payload.append({
+            "id": u.id,
+            "username": u.username,
+            "fullname": u.fullname or "-",
+            "mail": u.mail or "-",
+            "is_external": u.is_external,
+            # Explicit boolean casting to prevent SQLite type bleeding
+            "is_admin": bool(u.is_admin),
+            "config_admin": bool(u.config_admin),
+            "can_edit": (not u.is_external) and (u.id != current_user.id)
+        })
+
+    return jsonify({
+        "users": users_payload,
+        "usernames": all_usernames,
+        "current_user_id": current_user.id,
+        "pagination": {
+            "page": pagination.page,
+            "pages": pagination.pages,
+            "has_prev": pagination.has_prev,
+            "has_next": pagination.has_next,
+            "prev_num": pagination.prev_num,
+            "next_num": pagination.next_num,
+            "total": pagination.total
+        }
+    })
+
+
+@app.route('/api/users/toggle-role', methods=['POST'])
+@login_required
+def api_toggle_user_role():
+    if not current_user.config_admin:
+        return jsonify({"success": False, "message": "Unauthorized"}), 403
+
+    data = request.json or {}
+    user_id = data.get('user_id')
+    role_type = data.get('role')  
+    new_value = bool(data.get('value') is True)
+
+    target_user = User.query.get(user_id)
+    if not target_user:
+        return jsonify({"success": False, "message": "User not found."}), 404
+
+    if target_user.id == current_user.id:
+        return jsonify({"success": False, "message": "You cannot toggle your own privileges."}), 400
+    # Explicitly route the assignment to bypass dynamic reflection issues
+    if role_type == 'is_admin':
+        target_user.is_admin = new_value
+    elif role_type == 'config_admin':
+        target_user.config_admin = new_value
+    else:
+        return jsonify({"success": False, "message": "Invalid role type specified."}), 400
+
+    try:
+        db.session.commit()
+        return jsonify({"success": True, "message": f"Successfully updated privileges for '{target_user.username}'."})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "message": f"Database error: {str(e)}"}), 500
+
+
+@app.route('/api/users/add', methods=['POST'])
+@login_required
+def api_add_user():
+    if not current_user.config_admin:
+        return jsonify({"success": False, "message": "Unauthorized"}), 403
+
+    data = request.json or {}
+    user_type = data.get('user_type', 'local')
+    username = data.get('username', '').strip()
+    
+    # Strictly extract as separate booleans
+    req_is_admin = bool(data.get('is_admin') is True)
+    req_config_admin = bool(data.get('config_admin') is True)
+
+    if not username:
+        return jsonify({"success": False, "message": "Username is required."}), 400
+
+    existing_user = User.query.filter(User.username.ilike(username)).first()
+    if existing_user:
+        return jsonify({"success": False, "message": f"Username '{username}' already exists."}), 400
+
+    if user_type == 'external':
+        ldap_user_data, error_msg = search_ldap_user(username)
+        if error_msg:
+            return jsonify({"success": False, "message": error_msg}), 400
+
+        new_user = User(
+            username=ldap_user_data['username'],
+            password=None,
+            mail=ldap_user_data['mail'],
+            fullname=ldap_user_data['fullname'],
+            is_external=True,
+            is_admin=req_is_admin,
+            config_admin=req_config_admin
+        )
+    else:
+        fullname = data.get('fullname', '').strip()
+        mail = data.get('mail', '').strip()
+        password = data.get('password', '')
+        confirm_password = data.get('confirm_password', '')
+
+        if not all([fullname, mail, password, confirm_password]):
+            return jsonify({"success": False, "message": "All fields are required for local users."}), 400
+
+        if password != confirm_password:
+            return jsonify({"success": False, "message": "Passwords do not match."}), 400
+
+        new_user = User(
+            username=username,
+            password=generate_password_hash(password),
+            mail=mail,
+            fullname=fullname,
+            is_external=False,
+            is_admin=req_is_admin,
+            config_admin=req_config_admin
+        )
+
+    try:
+        db.session.add(new_user)
+        db.session.commit()
+        return jsonify({"success": True, "message": f"User '{username}' created successfully."})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "message": f"Database error: {str(e)}"}), 500
+
+
+@app.route('/api/users/edit', methods=['POST'])
+@login_required
+def api_edit_user():
+    if not current_user.config_admin:
+        return jsonify({"success": False, "message": "Unauthorized"}), 403
+
+    data = request.json or {}
+    user_id = data.get('user_id')
+
+    target_user = User.query.get(user_id)
+    if not target_user:
+        return jsonify({"success": False, "message": "User not found."}), 404
+
+    if target_user.id == current_user.id:
+        return jsonify({"success": False, "message": "You cannot edit your own account through this panel."}), 400
+
+    if target_user.is_external:
+        return jsonify({"success": False, "message": "External LDAP users cannot be edited."}), 400
+
+    new_username = data.get('username', '').strip()
+    new_fullname = data.get('fullname', '').strip()
+    new_mail = data.get('mail', '').strip()
+    new_password = data.get('password', '')
+    confirm_password = data.get('confirm_password', '')
+
+    if new_username and new_username.lower() != target_user.username.lower():
+        existing = User.query.filter(User.username.ilike(new_username)).first()
+        if existing:
+            return jsonify({"success": False, "message": f"Username '{new_username}' already exists."}), 400
+        target_user.username = new_username
+
+    if new_fullname:
+        target_user.fullname = new_fullname
+
+    if new_mail:
+        target_user.mail = new_mail
+
+    if new_password:
+        if not confirm_password:
+            return jsonify({"success": False, "message": "Password confirmation is required when setting a new password."}), 400
+        if new_password != confirm_password:
+            return jsonify({"success": False, "message": "New passwords do not match."}), 400
+        
+        target_user.password = generate_password_hash(new_password)
+
+    try:
+        db.session.commit()
+        return jsonify({"success": True, "message": f"User '{target_user.username}' updated successfully."})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "message": f"Database error: {str(e)}"}), 500
+
+
+@app.route('/api/users/delete', methods=['POST'])
+@login_required
+def api_delete_user():
+    if not current_user.config_admin:
+        return jsonify({"success": False, "message": "Unauthorized"}), 403
+
+    data = request.json or {}
+    user_id = data.get('user_id')
+
+    target_user = User.query.get(user_id)
+    if not target_user:
+        return jsonify({"success": False, "message": "User not found."}), 404
+
+    # Rule 1: Cannot delete self
+    if target_user.id == current_user.id:
+        return jsonify({"success": False, "message": "You cannot remove your own account."}), 400
+
+    # Rule 2: Cannot delete the last config_admin
+    if target_user.config_admin:
+        admin_count = User.query.filter_by(config_admin=True).count()
+        if admin_count <= 1:
+            return jsonify({"success": False, "message": "Cannot remove the only Configuration Admin in the system."}), 400
+
+    try:
+        db.session.delete(target_user)
+        db.session.commit()
+        return jsonify({"success": True, "message": f"User '{target_user.username}' removed successfully."})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "message": f"Database error: {str(e)}"}), 500
 
 
 # --- API Endpoints (For AJAX) ---

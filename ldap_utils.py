@@ -58,6 +58,50 @@ def validate_ldap_search(server_url: str, port: int, base_dn: str, bind_dn: str,
         return False, f"An unexpected error occurred: {str(e)}"
 
 
+def search_ldap_user(username):
+    """
+    Searches LDAP/AD for a specific username.
+    Returns (user_data_dict, error_message).
+    """
+    with app.app_context():
+        if not is_ldap_enabled():
+            return None, "LDAP authentication is currently disabled."
+
+        configs = Config.get_configs("ldap")
+        try:
+            server = Server(configs['LDAP_SERVER'], port=configs['LDAP_PORT'], get_info=ALL, connect_timeout=5)
+            conn = Connection(server, user=configs['BIND_USER_DN'], password=configs['BIND_USER_PASSWORD'], auto_bind=True)
+
+            search_filter = f"(&(objectClass=person)(|(sAMAccountName={username})(uid={username})))"
+
+            conn.search(
+                search_base=configs['BASE_DN'],
+                search_filter=search_filter,
+                attributes=["sAMAccountName", "mail", "displayName"]
+            )
+
+            if not conn.entries:
+                conn.unbind()
+                return None, f"User '{username}' was not found in LDAP/AD."
+
+            entry = conn.entries[0]
+            user_data = {
+                "username": str(getattr(entry, 'sAMAccountName', username)),
+                "mail": str(getattr(entry, 'mail', '') or ''),
+                "fullname": str(getattr(entry, 'displayName', '') or '')
+            }
+
+            conn.unbind()
+            return user_data, None
+
+        except LDAPBindError:
+            return None, "LDAP Bind Error: Check bind credentials in settings."
+        except LDAPException as e:
+            return None, f"LDAP Error: {str(e)}"
+        except Exception as e:
+            return None, f"Unexpected LDAP error: {str(e)}"
+
+
 def authenticate_and_user_data(username, password):
     """
     Authenticates a user against AD using uid (or sAMAccountName) and returns their data.
