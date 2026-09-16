@@ -205,6 +205,11 @@ select.search-input:focus {
     color: #374151;
 }
 
+.badge-schedule-stuck {
+    background-color: #b68de2;
+    color: #6b21a8;
+}
+
 .actions-container {
     display: flex;
     justify-content: space-between;

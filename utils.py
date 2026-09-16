@@ -21,6 +21,7 @@ class WorkloadStatus(str, Enum):
     TERMINATED = "terminated"
     FAILED = "failed"
     UNKNOWN = "unknown"
+    STUCK = "stuck"
 
     def __str__(self) -> str:
         return self.value.capitalize()

@@ -4,7 +4,7 @@ import redis
 import logging
 from datetime import datetime
 from cmlapi_manager import CMLAPIManager
-from utils import WorkloadType, SearchFilters, OrderByFilters
+from utils import WorkloadType, SearchFilters, OrderByFilters, WorkloadStatus
 
 # --- Custom JSON Encoder and Decoder for Datetime ---
 class DateTimeEncoder(json.JSONEncoder):
@@ -163,9 +163,14 @@ class WorkloadManager():
                 items.append(parent.copy())
                 sub_workload.remove(parent)
 
+            is_stuck = True
             for workload in sub_workload:
                 if parent:
                     workload["workload_type"] = parent["workload_type"]
+
+                if workload["status"] == WorkloadStatus.RUNNING:
+                    is_stuck = False 
+
                 items.append(workload)
                 cpu += workload.get("cpu", 0)
                 ram += workload.get("ram", 0)
@@ -175,6 +180,9 @@ class WorkloadManager():
             parent["cpu"] = cpu
             parent["ram"] = ram
             parent["Resource Profile"] = f"{cpu} vCPU / {ram} GiB Memory"
+
+            if is_stuck:
+                parent["status"] = WorkloadStatus.STUCK
             grouped_workloads.append({
                 **parent,
                 "has_sub_workload": True,
