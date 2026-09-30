@@ -158,7 +158,7 @@ def update_user_details(username, password=None, mail=None, fullname=None, is_ad
 
         if config_admin is not None:
             user.config_admin = config_admin
-            
+
         # Commit the changes to the database
         try:
             db.session.commit()

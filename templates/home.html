@@ -24,7 +24,7 @@
                     <a class="nav-link" href="/runtimes">Runtimes</a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="/stats">Stats</a>
+                    <a class="nav-link" href="/jobs">Jobs</a>
                 </li>
                 {% endif %}
             </ul>
@@ -76,6 +76,25 @@
                 {% endif %}
             </div>
         {% else %}
+            <div id="utilization-section" class="mb-5">
+                <!-- Added justify-content-between here to push the toggle to the right -->
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h2 class="mb-0">Cluster Utilization</h2>
+                    {% if user.is_admin %}
+                    <div class="form-check form-switch mt-1">
+                        <input class="form-check-input" type="checkbox" id="toggleIndividualWorks" onchange="toggleWorksView()">
+                        <label class="form-check-label text-muted small fw-bold" style="user-select:none; cursor:pointer;" for="toggleIndividualWorks">Show Individual Nodes</label>
+                    </div>
+                    {% endif %}
+                </div>
+                <div id="nodes-container" class="row justify-content-center g-3">
+                    <!-- Injected via stats.js -->
+                    <div class="col-12 text-center py-4">
+                        <div class="spinner-border text-primary" role="status"></div>
+                    </div>
+                </div>
+            </div>
+
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <h2 class="d-flex">Active Workload</h2>    
                 <button class="d-flex btn btn-primary btn-sm" style="height: 35px" onclick="refreshData()">Refresh Data</button>
@@ -467,5 +486,6 @@
         let SEARCH_DATA = JSON.parse({{ search_data | default('[]') | tojson }});
     </script>
     <script src="static/js/home.js"></script>
+    <script src="static/js/stats.js"></script>
 </body>
 </html>

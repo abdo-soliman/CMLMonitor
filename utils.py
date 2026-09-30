@@ -1,7 +1,8 @@
 import os
 import re
 from enum import Enum
-
+from zoneinfo import ZoneInfo
+from datetime import datetime
 
 class WorkloadType(str, Enum):
     ALL = "all"
@@ -239,3 +240,31 @@ def parse_quantity(quantity_str) -> float:
         return float(quantity_str[:-1]) * (1024 ** 4)
     else:
         return float(quantity_str)
+
+
+def sqlite_fix_timezone(date_time_obj, time_zone):
+    if not date_time_obj:
+        return datetime.now()
+
+    try:
+        job_tz = ZoneInfo(time_zone)
+    except Exception:
+        job_tz = ZoneInfo("UTC") # Safe fallback
+
+    try:
+        # If the SDK already parsed it into a datetime object
+        if isinstance(date_time_obj, datetime):
+            dt = date_time_obj
+        else:
+            # Fallback for raw ISO strings
+            clean_str = str(date_time_obj).replace("Z", "+00:00")
+            dt = datetime.fromisoformat(clean_str)
+
+        # Ensure it has a timezone before converting
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+
+        # Shift to target timezone and strip tzinfo for SQLite compatibility
+        return dt.astimezone(job_tz).replace(tzinfo=None)
+    except Exception:
+        return datetime.now()

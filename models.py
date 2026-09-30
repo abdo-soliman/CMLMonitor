@@ -149,3 +149,23 @@ class Runtime(db.Model):
 
     # Relationship to user
     user = db.relationship('User', backref='added_runtimes')
+
+
+class Job(db.Model):
+    __tablename__ = 'jobs'
+
+    id = db.Column(db.String(150), primary_key=True)
+    project_id = db.Column(db.String(150), nullable=False)
+    username = db.Column(db.String(150), nullable=False)
+    name = db.Column(db.String(250), nullable=False)
+    type = db.Column(db.String(50), nullable=False)  # manual, cron, dependent
+    parent_job_id = db.Column(db.String(150), nullable=True)
+    paused = db.Column(db.Boolean, default=False, nullable=False)
+    script = db.Column(db.String(500), nullable=False)
+    schedule = db.Column(db.String(100), nullable=True)
+    runtime_id = db.Column(db.String(500), nullable=True)
+    cpu = db.Column(db.Float, default=0.0)
+    ram = db.Column(db.Float, default=0.0)
+    
+    created_at = db.Column(db.DateTime, nullable=False)
+    updated_at = db.Column(db.DateTime, nullable=False)

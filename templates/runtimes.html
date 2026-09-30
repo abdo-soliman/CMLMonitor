@@ -21,10 +21,10 @@
             <ul class="navbar-nav me-auto ms-4 mb-2 mb-lg-0">
                 {% if user.is_admin %}
                 <li class="nav-item">
-                    <a class="nav-link" href="/runtimes">Runtimes</a>
+                    <a class="nav-link active" href="/runtimes">Runtimes</a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="/stats">Stats</a>
+                    <a class="nav-link" href="/jobs">Jobs</a>
                 </li>
                 {% endif %}
             </ul>
@@ -36,7 +36,7 @@
                         <i class="fa-solid fa-gear"></i>
                     </a>
                 {% endif %}
-                
+
                 <div class="nav-item dropdown user-dropdown-hover">
                     <div class="d-flex align-items-center user-dropdown-trigger" data-bs-toggle="dropdown">
                         <div class="bg-primary text-white rounded-circle d-flex justify-content-center align-items-center me-2" style="width: 36px; height: 36px; font-weight: 600; font-size: 16px; cursor: pointer;">
@@ -64,10 +64,14 @@
     </nav>
 
     <div class="main-content">
+        <!-- Flash Message Container -->
+        <div id="flash-container" class="position-fixed top-0 start-50 translate-middle-x p-3" style="z-index: 1060; margin-top: 60px; min-width: 350px;"></div>
+
         {% if user.config_admin %}
         <div style="display: flex; justify-content: right; align-items: center; margin-bottom: 25px;">
-            <button class="d-flex btn btn-outline-secondary btn-sm me-2" style="height: 35px" onclick="syncRuntimes()">
-                <i class="fa-solid fa-rotate me-2 mt-1"></i> Sync from CML
+            <button id="btnSyncRuntimes" class="d-flex align-items-center justify-content-center btn btn-outline-secondary btn-sm me-2" style="height: 35px; min-width: 140px;" onclick="syncRuntimes()">
+                <span class="spinner-border spinner-border-sm d-none me-2" role="status" aria-hidden="true"></span>
+                <span class="btn-text"><i class="fa-solid fa-rotate me-2 mt-1"></i>Sync from CML</span>
             </button>
         </div>
         {% endif %}
@@ -135,18 +139,6 @@
             <i class="fa-solid fa-layer-group text-secondary mb-3" style="font-size: 3rem;"></i>
             <h5 class="text-secondary mb-2">No Runtimes Found</h5>
             <p class="text-muted mb-0">There are currently no runtimes tracked in the system.</p>
-        </div>
-    </div>
-
-    <!-- Loading Modal -->
-    <div class="modal fade" id="loadingModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered modal-sm">
-            <div class="modal-content">
-                <div class="modal-body text-center p-4">
-                    <div class="spinner-border text-primary mb-3" role="status"></div>
-                    <h6 class="mb-0" id="loadingModalText">Refreshing Data...</h6>
-                </div>
-            </div>
         </div>
     </div>
 

@@ -1,22 +1,23 @@
 import os
 import re
 import math
+import redis
 import cmlapi
 import urllib3
 import logging
 import posixpath
-import pandas as pd
-from extensions import db, app
+import concurrent.futures
 from urllib.parse import quote
 from collections import defaultdict
 from kubernetes import client, config
-from models import Runtime, Config, User
-from ldap_utils import get_user_full_name
 from kubernetes.utils import parse_quantity
 from kubernetes.client.rest import ApiException
 from datetime import datetime, timezone, timedelta
-from utils import SearchFilters, WorkloadStatus, seconds_to_age, age_dict_tostring, keep_only_arabic, parse_quantity
 
+from extensions import db, app
+from ldap_utils import get_user_full_name
+from models import Runtime, Config, User, Job
+from utils import SearchFilters, WorkloadStatus, seconds_to_age, age_dict_tostring, keep_only_arabic, parse_quantity, sqlite_fix_timezone
 
 class CMLAPIManager:
     _instance = None
@@ -24,10 +25,19 @@ class CMLAPIManager:
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
         return cls._instance
 
     def  __init__(self):
+        if self._initialized:
+            return
+            
+        valkey_host = os.getenv("VALKEY_HOST", "localhost")
+        valkey_port = int(os.getenv("VALKEY_PORT", 6379))
+        self.valkey = redis.Redis(host=valkey_host, port=valkey_port, db=0, decode_responses=True)
+
         self.POD_CLUSTERING_WINDOW_SIZE = int(os.getenv("POD_CLUSTERING_WINDOW_SIZE", 120))
+        
         with app.app_context():
             cml_configs = Config.get_configs("cml")
             self.WORKSPACE_DOMAIN = cml_configs["WORKSPACE_DOMAIN"]
@@ -40,6 +50,7 @@ class CMLAPIManager:
         config.load_kube_config(config_file=self.KUBECONFIG_PATH)
         self.v1 = client.CoreV1Api()
         self.cml_client = cmlapi.default_client(self.WORKSPACE_DOMAIN, self.API_KEY)
+        self._initialized = True
 
     def clean_projectname(self, project_name):
         result = project_name.replace("\u202f", ' ')
@@ -50,7 +61,6 @@ class CMLAPIManager:
         result = re.sub(r'-+', '-', result)  
         result = result.replace('&', 'and')
         result = result.replace('|', 'or')
-
         if result == "":
             return "404"
         return result
@@ -79,13 +89,11 @@ class CMLAPIManager:
             runtime = Runtime.query.filter_by(image=image_url).first()
             if runtime:
                 return runtime.editor_name.strip(), runtime.editor_version.strip()
-
             return None, None
 
     def get_engine_cpu_and_ram(self, engine):
         if engine and engine.resources and engine.resources.requests:
             requests = engine.resources.requests
-
             raw_cpu = requests.get("cpu")
             raw_memory = requests.get("memory")
 
@@ -169,11 +177,8 @@ class CMLAPIManager:
 
     def get_running_pods(self, cutoff_age_seconds):
         config.load_kube_config(config_file=self.KUBECONFIG_PATH)
-
         now = datetime.now(timezone.utc)
         pods = []
-        raw = []
-
         try:
             response = self.v1.list_pod_for_all_namespaces(watch=False)
             for pod in response.items:
@@ -189,9 +194,6 @@ class CMLAPIManager:
                 namespace_pattern = re.compile(rf"^{re.escape(self.NAMESPACE_PREFIX)}.*$")
                 
                 if re.fullmatch(namespace_pattern, namespace) and age >= cutoff_age_seconds:
-                    raw.append(pod)
-
-                    # Safeguard container extraction
                     engine_container = next((c for c in (pod.spec.containers or []) if c.name == "engine"), None)
                     username, project_id, engine_image = None, None, None
                     cpu, ram = 0, 0
@@ -202,7 +204,6 @@ class CMLAPIManager:
                         cpu, ram = self.get_engine_cpu_and_ram(engine_container)
                         engine_image = engine_container.image
 
-                    # Safely fetch labels in case they are missing
                     labels = pod.metadata.labels or {}
                     role = labels.get("ds-role", "unknown")
                     role = "session or application" if role == "session" else role
@@ -243,21 +244,16 @@ class CMLAPIManager:
                         "start_time": start_time,
                         "creation_time": creation_time,
                     })
-
             return pods
         except ApiException as e:
             logging.error(f"Exception when calling CoreV1Api->list_pod_for_all_namespaces:{e}\n")
 
     def get_running_sessions(self, start, end):
-        logging.info("Connecting to CML API...")
-
         sort = 'created_at'
         page_size = 100000
         time_range_search_filter = "{\"created_time\":{\"min\":\"" + start + "\",\"max\":\"" + end + "\"}}"
         try:
-            logging.info(f"Getting Usage Stats for all running Sessions between: {start} and {end}")
             api_response = self.cml_client.list_usage(sort=sort, page_size=page_size, time_range_search_filter=time_range_search_filter)
-
             response = api_response.to_dict()
             return response["usage_response"]
         except cmlapi.rest.ApiException as e:
@@ -377,39 +373,46 @@ class CMLAPIManager:
         return workloads, search_data
 
     def sync_runtimes(self):
-        """Fetches runtimes from CML API and updates the local database."""
+        """Fetches runtimes from CML API and updates the local database in a tight transaction."""
+        # Use Valkey as a distributed lock with a 60-second expiration
+        if not self.valkey.set("runtimes_sync_lock", "locked", nx=True, ex=60):
+            return False
+
         logging.info("Starting runtimes sync from CML API...")
         try:
             response = self.cml_client.list_runtimes(page_size=1000)
             data = response.to_dict().get("runtimes", [])
+            
             users_map = {0: "system"}
+            for rt_data in data:
+                user_id = rt_data.get("register_user_id")
+                if user_id and user_id not in users_map:
+                    try:
+                        u_resp = self.cml_client.get_short_user_by_id(user_id)
+                        users_map[user_id] = u_resp.to_dict().get("username", "unknown")
+                    except Exception:
+                        users_map[user_id] = "unknown"
             
             with app.app_context():
-                # Get existing DB users to prevent FK constraint violations
                 valid_db_usernames = {u.username for u in User.query.all()}
-                
+                existing_runtimes = {r.image: r for r in Runtime.query.all()}
+                active_images = set()
+
                 for rt_data in data:
-                    user_id = rt_data.get("register_user_id")
-                    if user_id not in users_map:
-                        try:
-                            u_resp = self.cml_client.get_short_user_by_id(user_id)
-                            users_map[user_id] = u_resp.to_dict().get("username", "unknown")
-                        except Exception:
-                            users_map[user_id] = "unknown"
+                    image = rt_data.get("image_identifier")
+                    active_images.add(image)
                     
-                    cml_username = users_map[user_id]
-                    # Map to None if the CML user isn't locally registered to avoid FK errors
+                    user_id = rt_data.get("register_user_id")
+                    cml_username = users_map.get(user_id, "unknown")
                     added_by = cml_username if cml_username in valid_db_usernames else None
                     
-                    image = rt_data.get("image_identifier")
                     editor_name = rt_data.get("editor")
                     editor_version = rt_data.get("edition")
                     status = str(rt_data.get("status", "ENABLED")).upper()
                     if status not in ["ENABLED", "DISABLED"]:
                         status = "ENABLED"
                     
-                    # Update if exists, Insert if new
-                    db_runtime = Runtime.query.filter_by(image=image).first()
+                    db_runtime = existing_runtimes.get(image)
                     if db_runtime:
                         db_runtime.editor_name = editor_name
                         db_runtime.editor_version = editor_version
@@ -424,29 +427,247 @@ class CMLAPIManager:
                             added_by=added_by
                         )
                         db.session.add(new_runtime)
-                
+
+                for image, db_runtime in existing_runtimes.items():
+                    if image not in active_images:
+                        db.session.delete(db_runtime)
+                        
                 db.session.commit()
-                logging.info("Successfully synced runtimes from CML API.")
-                return True
+            logging.info("Successfully synced runtimes from CML API.")
+            return True
         except Exception as e:
             logging.error(f"Failed to sync runtimes: {e}")
             return False
+        finally:
+            self.valkey.delete("runtimes_sync_lock")
+
+    def _process_project_jobs(self, project):
+        """Worker function for threading. Fetches all jobs and runs for a single project."""
+        project_id = project["id"]
+        project_username = project["owner"]["username"].lower().replace(' ', '')
+        project_clean_name = self.clean_projectname(project["name"])
+
+        parts = [self.WORKSPACE_DOMAIN, project_username, project_clean_name]
+        if project_clean_name == "404":
+            parts = [self.WORKSPACE_DOMAIN, "404"]
+        project_url = posixpath.join(*parts)
+
+        local_jobs_payload = []
+        local_db_updates = []
+
+        try:
+            jobs_response = self.cml_client.list_jobs(project_id, page_size=1000)
+            cml_jobs = jobs_response.to_dict().get("jobs", [])
+        except Exception:
+            return local_jobs_payload, local_db_updates
+
+        for cml_job in cml_jobs:
+            job_id = cml_job["id"]
+            job_type = cml_job.get("type", "manual")
+
+            last_run_starting_time = None
+            last_run_finished_time = None
+            last_run_status = "Unknown"
+
+            try:
+                runs_response = self.cml_client.list_job_runs(project_id, job_id, sort="-created_at", page_size=1)
+                runs = runs_response.to_dict().get("job_runs", [])
+                if runs:
+                    last_run = runs[0]
+                    last_run_starting_time = last_run.get("starting_at")
+                    last_run_finished_time = last_run.get("finished_at")
+
+                    raw_status = last_run.get("status", "Unknown")
+                    if isinstance(raw_status, str):
+                        status_parts = raw_status.split("_")
+                        last_run_status = status_parts[1].capitalize() if len(status_parts) == 2 else raw_status.capitalize()
+            except Exception:
+                pass
+
+            parent_job_id = cml_job.get("parent_id") if job_type == "dependent" else None
+            cron_schedule = cml_job.get("schedule", "") if job_type == "cron" else ""
+
+            editor_name, editor_version = self.get_image_editor(cml_job.get("runtime_identifier"))
+            cpu = float(cml_job.get("cpu", 0.0))
+            ram = float(cml_job.get("memory", 0.0))
+
+            job_tz_str = cml_job.get("timezone") or "UTC"
+            created_at = sqlite_fix_timezone(cml_job.get("created_at"), job_tz_str)
+            updated_at = sqlite_fix_timezone(cml_job.get("updated_at"), job_tz_str)
+
+            creator_user = cml_job.get("creator", {}).get("username", "")
+            fullname = get_user_full_name(creator_user) if self.LDAP_ENABLED else creator_user
+            fullname, _ = keep_only_arabic(fullname) if self.LDAP_ENABLED else (fullname, False)
+
+            local_jobs_payload.append({
+                "id": job_id,
+                "name": cml_job["name"],
+                "username": creator_user,
+                "fullname": fullname,
+                "project_name": project["name"],
+                "project_url": project_url,
+                "editor_name": editor_name,
+                "editor_version": editor_version,
+                "script": cml_job.get("script", ""),
+                "job_type": job_type,
+                "schedule": cron_schedule,
+                "parent_job_id": parent_job_id,
+                "paused": bool(cml_job.get("paused", False)),
+                "cpu": cpu,
+                "ram": ram,
+                "last_run_starting_time": last_run_starting_time,
+                "last_run_finished_time": last_run_finished_time,
+                "last_run_status": last_run_status
+            })
+
+            local_db_updates.append({
+                "id": job_id,
+                "project_id": project_id,
+                "username": creator_user,
+                "name": cml_job["name"],
+                "type": job_type,
+                "parent_job_id": parent_job_id,
+                "paused": bool(cml_job.get("paused", False)),
+                "script": cml_job.get("script", ""),
+                "schedule": cron_schedule,
+                "runtime_id": cml_job.get("runtime_identifier"),
+                "cpu": cpu,
+                "ram": ram,
+                "created_at": created_at,
+                "updated_at": updated_at
+            })
+
+        return local_jobs_payload, local_db_updates
+
+    def sync_jobs(self):
+        """FULL SYNC: Fetches projects, jobs, and runs. Updates DB and Valkey."""
+        if not self.cml_client:
+            return False, [], "CML Client not initialized."
+
+        # Distributed Redis lock prevents UI timeouts if already syncing (Auto-expires in 5 mins)
+        if not self.valkey.set("cml_jobs_sync_lock", "locked", nx=True, ex=300):
+            return False, [], "A job sync is already in progress. Please wait."
+
+        try:
+            logging.info("Starting threaded FULL jobs sync from CML API...")
+            projects_response = self.cml_client.list_projects(page_size=1000, include_all_projects=True)
+            projects = projects_response.to_dict().get("projects", [])
+
+            jobs_payload = []
+            db_updates = []
+
+            # 10 threads to rapidly query the jobs for each project
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [executor.submit(self._process_project_jobs, p) for p in projects]
+                for future in concurrent.futures.as_completed(futures):
+                    p_payload, p_db_updates = future.result()
+                    jobs_payload.extend(p_payload)
+                    db_updates.extend(p_db_updates)
+
+            # Post-process parent job names for the UI schedule column
+            for job in jobs_payload:
+                if job["parent_job_id"]:
+                    parent_name = next((j["name"] for j in jobs_payload if j["id"] == job["parent_job_id"]), job["parent_job_id"])
+                    job["schedule"] = parent_name
+
+            with app.app_context():
+                existing_jobs = {j.id: j for j in Job.query.all()}
+                active_job_ids = set()
+
+                for data in db_updates:
+                    job_id = data["id"]
+                    active_job_ids.add(job_id)
+
+                    db_job = existing_jobs.get(job_id)
+                    if db_job:
+                        db_job.name = data["name"]
+                        db_job.type = data["type"]
+                        db_job.parent_job_id = data["parent_job_id"]
+                        db_job.paused = data["paused"]
+                        db_job.script = data["script"]
+                        db_job.schedule = data["schedule"]
+                        db_job.runtime_id = data["runtime_id"]
+                        db_job.cpu = data["cpu"]
+                        db_job.ram = data["ram"]
+                        db_job.updated_at = data["updated_at"]
+                    else:
+                        new_job = Job(**data)
+                        db.session.add(new_job)
+
+                for job_id, db_job in existing_jobs.items():
+                    if job_id not in active_job_ids:
+                        db.session.delete(db_job)
+
+                db.session.commit()
+            return True, jobs_payload, "Jobs fully synced."
+        except Exception as e:
+            logging.error(f"Failed to run FULL sync jobs: {e}")
+            return False, [], f"Sync failed: {e}"
+        finally:
+            self.valkey.delete("cml_jobs_sync_lock")
+
+    def _fetch_single_job_run(self, job_id, project_id):
+        """Worker function for lightweight sync."""
+        try:
+            runs_response = self.cml_client.list_job_runs(project_id, job_id, sort="-created_at", page_size=1)
+            runs = runs_response.to_dict().get("job_runs", [])
+            if runs:
+                last_run = runs[0]
+
+                raw_status = last_run.get("status", "Unknown")
+                status = str(raw_status).capitalize()
+                if isinstance(raw_status, str) and len(raw_status.split("_")) == 2:
+                    status = raw_status.split("_")[1].capitalize()
+
+                return job_id, {
+                    "starting_at": last_run.get("starting_at"),
+                    "finished_at": last_run.get("finished_at"),
+                    "status": status
+                }
+        except:
+            pass
+        return job_id, None
+
+    def sync_jobs_lightweight(self):
+        """LIGHTWEIGHT SYNC: Rapidly updates runs for known jobs."""
+        if not self.cml_client:
+            return False, {}, "CML Client not initialized."
+
+        # Share the exact same Redis lock with the heavy sync
+        if not self.valkey.set("cml_jobs_sync_lock", "locked", nx=True, ex=300):
+            return False, {}, "A job sync is already in progress. Please wait."
+
+        try:
+            logging.info("Starting threaded LIGHTWEIGHT jobs sync...")
+            with app.app_context():
+                # Query all known jobs from DB
+                jobs = Job.query.all()
+                tasks = [(j.id, j.project_id) for j in jobs]
+
+            updates = {}
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [executor.submit(self._fetch_single_job_run, jid, pid) for jid, pid in tasks]
+                for future in concurrent.futures.as_completed(futures):
+                    jid, run_data = future.result()
+                    if run_data:
+                        updates[jid] = run_data
+
+            return True, updates, "Lightweight sync complete."
+        except Exception as e:
+            logging.error(f"Failed to run LIGHTWEIGHT sync jobs: {e}")
+            return False, {}, f"Sync failed: {e}"
+        finally:
+            self.valkey.delete("cml_jobs_sync_lock")
 
     def get_worker_node_utilization(self):
-        """
-        Calculates CPU and RAM utilization for worker nodes based on container requests.
-        Excludes master and control-plane nodes.
-        """
         try:
             config.load_kube_config(config_file=self.KUBECONFIG_PATH)
             nodes = self.v1.list_node().items
             node_data = {}
 
-            # 1. Identify Worker Nodes and record total capacity
             for node in nodes:
                 labels = node.metadata.labels or {}
-                
-                # Exclude Master / Control-Plane / ETCD nodes
                 is_master = any(
                     key in labels 
                     for key in ["node-role.kubernetes.io/master", "node-role.kubernetes.io/control-plane", "node-role.kubernetes.io/etcd"]
@@ -465,7 +686,6 @@ class CMLAPIManager:
                     "mem_req": 0.0
                 }
 
-            # 2. Sum resource requests for active pods running on worker nodes
             pods = self.v1.list_pod_for_all_namespaces().items
             for pod in pods:
                 node_name = pod.spec.node_name
@@ -481,7 +701,6 @@ class CMLAPIManager:
                     if "memory" in requests:
                         node_data[node_name]["mem_req"] += parse_quantity(requests["memory"])
 
-            # 3. Format metrics per worker node
             result = []
             for node_name, data in node_data.items():
                 cpu_req = data["cpu_req"]
@@ -494,11 +713,11 @@ class CMLAPIManager:
 
                 def resolve_color(pct):
                     if pct < 75.0:
-                        return "#007bff" # Blue
+                        return "#007bff"
                     elif pct <= 90.0:
-                        return "#ffc107" # Yellow
+                        return "#ffc107"
                     else:
-                        return "#dc3545" # Red
+                        return "#dc3545"
 
                 result.append({
                     "node_name": node_name,
@@ -522,14 +741,3 @@ class CMLAPIManager:
         except Exception as e:
             logging.error(f"Error calculating node utilization: {e}")
             return []
-
-if __name__ == "__main__":
-    cmlapi_manager = CMLAPIManager()
-    workloads, _ = cmlapi_manager.workload_report()
-
-    df = pd.DataFrame(workloads)
-    df["start_time"] = pd.to_datetime(df["start_time"])
-    df["creation_time"] = pd.to_datetime(df["creation_time"])
-    df["start_time"] = df["start_time"].dt.tz_convert("Asia/Riyadh").dt.tz_localize(None)
-    df["creation_time"] = df["creation_time"].dt.tz_convert("Asia/Riyadh").dt.tz_localize(None)
-    df.to_excel("pods_workloads.xlsx", index=False)

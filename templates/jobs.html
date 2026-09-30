@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Jobs - CMLMonitor</title>
+    <link rel="stylesheet" href="static/css/bootstrap5.3.0.min.css">
+    <link rel="stylesheet" href="static/css/all6.4.0.min.css">
+    <link rel="stylesheet" href="static/css/home.css">
+</head>
+
+<body>
+    <nav class="navbar navbar-expand-lg fixed-top bg-white border-bottom">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                CML <span>MONITOR</span>
+            </a>
+
+            <ul class="navbar-nav me-auto ms-4 mb-2 mb-lg-0">
+                {% if user.is_admin %}
+                <li class="nav-item">
+                    <a class="nav-link" href="/runtimes">Runtimes</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link active" href="/jobs">Jobs</a>
+                </li>
+                {% endif %}
+            </ul>
+
+            <div class="d-flex align-items-center">
+                {% if user.config_admin %}
+                    <a href="/config" class="text-secondary me-4 text-decoration-none" title="Configuration">
+                        <i class="fa-solid fa-gear" style="font-size: 1.25rem;"></i>
+                    </a>
+                {% endif %}
+                
+                <div class="nav-item dropdown user-dropdown-hover">
+                    <div class="d-flex align-items-center user-dropdown-trigger" data-bs-toggle="dropdown">
+                        <div class="bg-primary text-white rounded-circle d-flex justify-content-center align-items-center me-2" style="width: 36px; height: 36px; font-weight: 600;">
+                            {{ user.username[:1]|upper }}
+                        </div>
+                        <span class="text-dark fw-semibold">{{ user.username }}</span>
+                        <i class="fa-solid fa-chevron-down ms-2 small text-muted"></i>
+                    </div>
+
+                    <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0 mt-2">
+                        <li class="px-3 py-2 border-bottom user-details-box">
+                            <div class="fw-bold text-dark">{{ user.fullname }}</div>
+                            <div class="text-muted small"><i class="fa-solid fa-user me-1"></i>{{ user.username }}</div>
+                        </li>
+                        <li>
+                            <a class="dropdown-item text-danger d-flex align-items-center mt-1" href="/logout">
+                                <i class="fa-solid fa-right-from-bracket me-2"></i> Logout
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="main-content">
+        <!-- Flash Message Container -->
+        <div id="flash-container" class="position-fixed top-0 start-50 translate-middle-x p-3" style="z-index: 1060; margin-top: 60px; min-width: 350px;"></div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
+            <h2 class="mb-0">Job Schedules</h2>
+            <button id="btnSyncJobs" class="d-flex align-items-center justify-content-center btn btn-primary btn-sm" style="height: 35px; min-width: 120px;" onclick="syncJobs()">
+                <span class="spinner-border spinner-border-sm d-none me-2" role="status" aria-hidden="true"></span>
+                <span class="btn-text">Refresh Jobs</span>
+            </button>
+        </div>
+
+        <div class="actions-container d-flex justify-content-between mb-3 bg-white p-3 rounded border shadow-sm">
+            <div class="d-flex align-items-center">
+                <input id="searchInput" type="search" class="form-control search-input" placeholder="Search by Job Name or Script..." style="width: 300px;" oninput="onSearchInput(this.value)">
+            </div>
+
+            <div class="pagination-container d-flex justify-content-end align-items-center">
+                <nav aria-label="Table pagination" class="me-3">
+                    <ul class="pagination pagination-sm mb-0">
+                        <li class="page-item disabled" id="btn-first"><button class="page-link"><i class="fa-solid fa-backward-step"></i></button></li>
+                        <li class="page-item disabled" id="btn-prev"><button class="page-link"><i class="fa-solid fa-angle-left"></i></button></li>
+                        <li class="page-item disabled" id="btn-next"><button class="page-link"><i class="fa-solid fa-angle-right"></i></button></li>
+                        <li class="page-item disabled" id="btn-last"><button class="page-link"><i class="fa-solid fa-forward-step"></i></button></li>
+                    </ul>
+                </nav>
+
+                <div class="d-flex align-items-center">
+                    <select id="pageSizeSelect" class="form-select form-select-sm search-input" style="width: 70px; height: 35px;" onchange="changePageSize(this.value)">
+                        <option value="25" selected>25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="table-container shadow-sm">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>User Details</th>
+                        <th>Project</th>
+                        <th>Editor / Version</th>
+                        <th>Script</th>
+                        <th>Schedule</th>
+                        <th>Resource Profile</th>
+                        <th>Last Run / Status</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                    <tr><td colspan="8" class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="static/js/bootstrap5.3.0.bundle.min.js"></script>
+    <script src="static/js/jobs.js"></script>
+</body>
+</html>

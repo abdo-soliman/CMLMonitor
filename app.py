@@ -4,6 +4,7 @@ os.chdir(os.environ["WORK_DIR"])
 
 import io
 import ast
+import time
 import json
 import tempfile
 import threading
@@ -42,7 +43,6 @@ APP_VERSION = "2.0"
 
 def runtime_sync_daemon(app_context):
     """Background loop that forces a runtime sync every 24 hours."""
-    import time
     with app_context:
         while True:
             try:
@@ -52,10 +52,35 @@ def runtime_sync_daemon(app_context):
             time.sleep(86400)  # 24 hours
 
 
+def jobs_sync_daemon(app_context):
+    """Full background loop that syncs all projects and jobs every 1 hour."""
+    with app_context:
+        while True:
+            try:
+                if workload_manager:
+                    workload_manager.cache_jobs()
+            except Exception as e:
+                pass
+            time.sleep(3600)  # 1 hour
+
+
+def jobs_light_sync_daemon(app_context):
+    """Lightweight background loop updating runs every 2 minutes."""
+    with app_context:
+        # Initial wait to let full sync finish caching on boot
+        time.sleep(30)
+        while True:
+            try:
+                if workload_manager:
+                    workload_manager.cache_jobs_lightweight()
+            except Exception as e:
+                pass
+            time.sleep(120)  # 2 minutes
+
+
 # --- Background Daemon for Stats Polling ---
 def node_stats_daemon(app_context):
     """Background loop polling node utilization every 3 seconds."""
-    import time
     with app_context:
         while True:
             try:
@@ -79,9 +104,14 @@ def init_workload_manager():
         t = threading.Thread(target=runtime_sync_daemon, args=(app_context,), daemon=True)
         t.start()
 
-        # Worker node utilization live monitoring thread (3-second frequency)
         t_stats = threading.Thread(target=node_stats_daemon, args=(app_context,), daemon=True)
         t_stats.start()
+
+        t_jobs = threading.Thread(target=jobs_sync_daemon, args=(app_context,), daemon=True)
+        t_jobs.start()
+
+        t_jobs_light = threading.Thread(target=jobs_light_sync_daemon, args=(app_context,), daemon=True)
+        t_jobs_light.start()
 
 
 def is_cml_configed():
@@ -1396,33 +1426,95 @@ def api_sync_runtimes():
         return jsonify({"success": False, "message": "Failed to sync runtimes."}), 500
 
 
-# --- Stats Page Routes ---
-@app.route('/stats')
+@app.route('/jobs')
 @login_required
-def stats_page():
-    if not current_user or current_user.is_anonymous:
-        return redirect(url_for('login'))
-
+def jobs_page():
     if not current_user.is_admin:
-        return jsonify({"error": "Unauthorized"}), 401
+        return redirect(url_for('home'))
 
-    user = {
+    user_data = {
         "username": current_user.username,
         "fullname": current_user.fullname,
         "mail": current_user.mail,
         "is_admin": current_user.is_admin,
         "config_admin": current_user.config_admin
     }
+    return render_template('jobs.html', user=user_data, app_version=APP_VERSION)
 
-    return render_template('stats.html', user=user, app_version=APP_VERSION)
+
+@app.route('/api/jobs')
+@login_required
+def api_jobs():
+    if not current_user.is_admin:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    page_size = request.args.get('size', default=25, type=int)
+    page_number = request.args.get('page', default=1, type=int)
+    search_value = request.args.get('search', default="", type=str).strip().lower()
+
+    jobs_data = workload_manager.get_jobs() if workload_manager else []
+
+    # Search filter by Name or Script
+    if search_value:
+        jobs_data = [j for j in jobs_data if search_value in j["name"].lower() or search_value in j["script"].lower()]
+
+    # Sort descending by latest runs for relevance
+    jobs_data = sorted(jobs_data, key=lambda x: str(x.get("last_run_starting_time") or ""), reverse=True)
+
+    start_index, end_index, page_number, page_size, max_number_of_pages = pagination_to_indecies(page_size, page_number, len(jobs_data))
+
+    return jsonify({
+        "jobs": jobs_data[start_index:end_index],
+        "pagination": {
+            "page": page_number,
+            "pages": max_number_of_pages,
+            "has_prev": page_number > 1,
+            "has_next": page_number < max_number_of_pages,
+            "prev_num": page_number - 1,
+            "next_num": page_number + 1,
+            "total": len(jobs_data)
+        }
+    })
+
+@app.route('/api/jobs/sync', methods=['POST'])
+@login_required
+def api_sync_jobs():
+    if not current_user.is_admin:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        if not workload_manager:
+            return jsonify({"success": False, "message": "Workload manager not initialized."}), 500
+
+        # Check if a heavy sync is already currently running
+        status = workload_manager.valkey.get("cml_heavy_sync_status")
+        if status == "running":
+            return jsonify({"success": False, "message": "A job sync is already in progress. Please wait."}), 429
+
+        # Set status to running and detach the process into a background thread
+        workload_manager.valkey.set("cml_heavy_sync_status", "running")
+        threading.Thread(target=workload_manager.cache_jobs, daemon=True).start()
+        
+        return jsonify({"success": True, "message": "Jobs sync started in background."})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Failed to start refresh: {str(e)}"}), 500
 
 
+@app.route('/api/jobs/sync/status', methods=['GET'])
+@login_required
+def api_sync_jobs_status():
+    """Endpoint for the UI to poll the progress of the background thread."""
+    if not current_user.is_admin:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    status = workload_manager.valkey.get("cml_heavy_sync_status") or "idle"
+    return jsonify({"status": status})
+
+
+# --- Stats Routes ---
 @app.route('/api/stats/utilization')
 @login_required
 def api_node_utilization():
-    if not current_user.is_admin:
-        return jsonify({"error": "Unauthorized"}), 401
-
     data = workload_manager.get_node_utilization() if workload_manager else []
     return jsonify({"nodes": data})
 
