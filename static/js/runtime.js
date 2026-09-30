@@ -146,24 +146,59 @@ function changePageSize(size) {
     fetchData(1); // Reset to page 1 on page size change
 }
 
-function syncRuntimes() {
-    const loadingModal = new bootstrap.Modal(document.getElementById('loadingModal'));
-    document.getElementById('loadingModalText').innerText = "Syncing from CML...";
-    loadingModal.show();
+// -- Sync API and UI Alerts --
+async function syncRuntimes() {
+    const btn = document.getElementById('btnSyncRuntimes');
+    const spinner = btn.querySelector('.spinner-border');
+    const btnText = btn.querySelector('.btn-text');
 
-    fetch('/api/runtimes/sync', { method: 'POST' })
-    .then(response => response.json())
-    .then(data => {
-        loadingModal.hide();
+    // Disable button and show spinner
+    btn.disabled = true;
+    spinner.classList.remove('d-none');
+    btnText.innerHTML = 'Syncing...'; // Removed the icon to cleanly show "Syncing..."
+
+    try {
+        const response = await fetch('/api/runtimes/sync', { method: 'POST' });
+        const data = await response.json();
+
         if (data.success) {
-            if (typeof fetchData === "function") fetchData(); // Reload table seamlessly
+            showFlashMessage(data.message || 'Runtimes synced successfully.', 'success');
+            fetchData(currentPage); // Reload table with new data
         } else {
-            alert("Error: " + data.message);
+            showFlashMessage(data.message || 'Failed to sync runtimes.', 'danger');
         }
-        loadingModal.hide();
-    })
-    .catch(err => {
-        loadingModal.hide();
-        alert("Failed to connect to the server.");
-    });
+    } catch (err) {
+        console.error("Failed to sync runtimes:", err);
+        showFlashMessage('A network error occurred while syncing runtimes.', 'danger');
+    } finally {
+        // Restore button state
+        btn.disabled = false;
+        spinner.classList.add('d-none');
+        btnText.innerHTML = '<i class="fa-solid fa-rotate me-2 mt-1"></i>Sync from CML';
+    }
+}
+
+function showFlashMessage(message, type = 'success') {
+    const container = document.getElementById('flash-container');
+    if (!container) return;
+
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type} alert-dismissible fade show shadow-sm`;
+    alertDiv.role = 'alert';
+    
+    // Add appropriate icon based on success/danger
+    const icon = type === 'success' ? 'fa-circle-check' : 'fa-circle-exclamation';
+    
+    alertDiv.innerHTML = `
+        <i class="fa-solid ${icon} me-2"></i>${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    `;
+    
+    container.appendChild(alertDiv);
+
+    // Auto dismiss after 5 seconds
+    setTimeout(() => {
+        alertDiv.classList.remove('show');
+        setTimeout(() => alertDiv.remove(), 150); // Wait for Bootstrap fade transition
+    }, 5000);
 }

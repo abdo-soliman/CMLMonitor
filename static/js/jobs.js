@@ -1,6 +1,7 @@
 let currentPage = 1;
 let currentSize = 25;
 let searchQuery = "";
+let syncPollInterval = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     fetchJobs(1);
@@ -63,8 +64,19 @@ function renderTable(jobs) {
         if (j.last_run_starting_time) {
             try {
                 const dateObj = new Date(j.last_run_starting_time);
-                lastRunHtml = `<strong>${dateObj.toLocaleString()}</strong><br>
-                               <span class="badge badge-schedule badge-schedule-${j.last_run_status.toLowerCase()}">${escapeHtml(j.last_run_status)}</span>`;
+                
+                // Extract properties to detect the dummy CML date (accounting for JS 2001 parsing quirk)
+                const year = dateObj.getFullYear();
+                const month = dateObj.getMonth(); // 0 is January
+                const date = dateObj.getDate();
+                
+                if ((year <= 1 || year === 2001) && month === 0 && date === 1) {
+                    lastRunHtml = `<strong class="text-danger">Job Run Failed to Start</strong><br>
+                                   <span class="badge badge-schedule badge-schedule-${j.last_run_status.toLowerCase()}">${escapeHtml(j.last_run_status)}</span>`;
+                } else {
+                    lastRunHtml = `<strong>${dateObj.toLocaleString()}</strong><br>
+                                   <span class="badge badge-schedule badge-schedule-${j.last_run_status.toLowerCase()}">${escapeHtml(j.last_run_status)}</span>`;
+                }
             } catch {
                 lastRunHtml = `<strong>${escapeHtml(j.last_run_starting_time)}</strong>`;
             }
@@ -127,4 +139,109 @@ function changePageSize(size) {
 function escapeHtml(str) {
     if (!str) return '';
     return String(str).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[m]);
+}
+
+async function syncJobs() {
+    const btn = document.getElementById('btnSyncJobs');
+    const spinner = btn.querySelector('.spinner-border');
+    const btnText = btn.querySelector('.btn-text');
+
+    // Disable button and show spinner
+    btn.disabled = true;
+    spinner.classList.remove('d-none');
+    btnText.innerText = 'Refreshing...';
+
+    try {
+        const response = await fetch('/api/jobs/sync', { method: 'POST' });
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            // Background thread successfully started. Begin polling the status.
+            pollSyncStatus();
+        } else {
+            // Handle 429 Too Many Requests or lock rejections
+            showFlashMessage(data.message || 'Failed to start job refresh.', 'danger');
+            resetSyncButton();
+        }
+    } catch (err) {
+        console.error("Failed to trigger sync:", err);
+        showFlashMessage('A network error occurred while triggering refresh.', 'danger');
+        resetSyncButton();
+    }
+}
+
+async function pollSyncStatus() {
+    const startTime = Date.now();
+    
+    // Clear any existing intervals just in case
+    if (syncPollInterval) clearInterval(syncPollInterval);
+
+    syncPollInterval = setInterval(async () => {
+        // Hard timeout: Stop polling after 5 minutes
+        if (Date.now() - startTime > 300000) {
+            clearInterval(syncPollInterval);
+            showFlashMessage('Sync request timed out after 5 minutes.', 'danger');
+            resetSyncButton();
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/jobs/sync/status');
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                clearInterval(syncPollInterval);
+                showFlashMessage('Jobs refreshed successfully.', 'success');
+                fetchJobs(currentPage); // Reload table with fresh data
+                resetSyncButton();
+            } else if (data.status === 'failed' || data.status === 'timeout') {
+                clearInterval(syncPollInterval);
+                showFlashMessage('Failed to refresh jobs on the server.', 'danger');
+                resetSyncButton();
+            }
+            // If status is 'running' or 'idle', do nothing. It will poll again in 3 seconds.
+            
+        } catch (err) {
+            console.error("Polling error:", err);
+            // Don't stop polling on a single network blip, just wait for the next tick
+        }
+    }, 3000); // Check status every 3 seconds
+}
+
+function resetSyncButton() {
+    const btn = document.getElementById('btnSyncJobs');
+    const spinner = btn.querySelector('.spinner-border');
+    const btnText = btn.querySelector('.btn-text');
+    
+    if (syncPollInterval) {
+        clearInterval(syncPollInterval);
+        syncPollInterval = null;
+    }
+
+    btn.disabled = false;
+    spinner.classList.add('d-none');
+    btnText.innerText = 'Refresh Jobs';
+}
+
+function showFlashMessage(message, type = 'success') {
+    const container = document.getElementById('flash-container');
+    if (!container) return;
+
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type} alert-dismissible fade show shadow-sm`;
+    alertDiv.role = 'alert';
+    
+    const icon = type === 'success' ? 'fa-circle-check' : 'fa-circle-exclamation';
+    
+    alertDiv.innerHTML = `
+        <i class="fa-solid ${icon} me-2"></i>${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    `;
+    
+    container.appendChild(alertDiv);
+
+    setTimeout(() => {
+        alertDiv.classList.remove('show');
+        setTimeout(() => alertDiv.remove(), 150); 
+    }, 5000);
 }
