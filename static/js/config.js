@@ -3,7 +3,8 @@ document.addEventListener("DOMContentLoaded", function() {
     // --- ALERTS / SMTP TAB ---
     const alertToggle = document.getElementById('alertEnabled');
     const alertsPane = document.getElementById('alerts');
-    const smtpTestBtn = document.getElementById('btn-test-smtp'); // 1. Grab the SMTP test button
+    const smtpTestBtn = document.getElementById('btn-test-smtp');
+    const dryRunBtn = document.getElementById('btn-dry-run');
 
     if (alertToggle && alertsPane) {
         const alertInputs = alertsPane.querySelectorAll('input:not(#alertEnabled)');
@@ -26,6 +27,9 @@ document.addEventListener("DOMContentLoaded", function() {
             if (smtpTestBtn) {
                 smtpTestBtn.disabled = !isEnabled;
             }
+            if (dryRunBtn) {
+                dryRunBtn.disabled = !isEnabled;
+            }
         }
 
         // Run once on page load to set initial state
@@ -44,7 +48,7 @@ document.addEventListener("DOMContentLoaded", function() {
     // --- LDAP TAB ---
     const ldapToggle = document.getElementById('ldapEnabled');
     const ldapPane = document.getElementById('ldap');
-    const ldapTestBtn = document.getElementById('btn-test-ldap'); // 3. Grab the LDAP test button
+    const ldapTestBtn = document.getElementById('btn-test-ldap');
 
     if (ldapToggle && ldapPane) {
         const ldapInputs = ldapPane.querySelectorAll('input:not(#ldapEnabled)');
@@ -223,4 +227,66 @@ function testSMTPConfig() {
             btn.disabled = false;
             btn.innerHTML = 'Send Test Email';
         });
+}
+
+// --- DRY RUN ACTIONS ---
+function openDryRunModal() {
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('dryRunModal'));
+    document.getElementById('dryRunAlert').classList.add('d-none');
+    modal.show();
+}
+
+function submitDryRun() {
+    const alertBox = document.getElementById('dryRunAlert');
+
+    const mode = document.getElementById('dry_run_mode').value;
+    const cutoffNum = document.getElementById('dry_run_cutoff_num').value.trim();
+    const cutoffUnit = document.getElementById('dry_run_cutoff_unit').value;
+    const recipientsRaw = document.getElementById('dry_run_recipients').value;
+
+    // Validation
+    if (!cutoffNum || !recipientsRaw) {
+        alertBox.className = 'alert alert-danger';
+        alertBox.textContent = 'Please fill out all required fields.';
+        alertBox.classList.remove('d-none');
+        return;
+    }
+
+    const recipients = recipientsRaw.split(',').map(e => e.trim()).filter(e => e);
+    if (recipients.length === 0) {
+        alertBox.className = 'alert alert-danger';
+        alertBox.textContent = 'Please provide at least one valid email address.';
+        alertBox.classList.remove('d-none');
+        return;
+    }
+
+    const payload = {
+        mode: mode,
+        cutoff: `${cutoffNum}${cutoffUnit}`,
+        recipients: recipients
+    };
+
+    // 1. Immediately hide the modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('dryRunModal'));
+    modal.hide();
+
+    // 2. Show a friendly scheduled message next to the trigger button
+    showConfigAlert('smtp-test-alert', 'info', 'Dry Run scheduled successfully. You should receive the email shortly!');
+
+    // 3. Send the request to the server in the background
+    fetch('/api/config/dry-run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(response => response.json())
+    .then(data => {
+        // Only update if there's a backend failure, otherwise leave the "scheduled" message
+        if (!data.success) {
+            showConfigAlert('smtp-test-alert', 'danger', data.message);
+        }
+    })
+    .catch(err => {
+        showConfigAlert('smtp-test-alert', 'danger', `Error scheduling dry run: ${err}`);
+    });
 }

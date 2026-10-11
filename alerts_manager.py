@@ -5,14 +5,15 @@ import argparse
 import pandas as pd
 from pathlib import Path
 from pprint import pprint
+from datetime import datetime
+from jinja2 import Environment, FileSystemLoader
+from croniter import croniter, CroniterBadCronError
+
 from models import Config
 from extensions import app
-from datetime import datetime
 from smtp_utils import send_email
 from utils import split_age, age_toseconds
 from workload_manager import WorkloadManager
-from jinja2 import Environment, FileSystemLoader
-from croniter import croniter, CroniterBadCronError
 
 workload_manager = None
 OUTPUT = None
@@ -95,7 +96,6 @@ class AlertsManager:
         ).reset_index()
 
         workload_data = summary_df.set_index('workload_type').to_dict('index')
-        # Now you can extract them into separate variables:
         sessions = workload_data.get('session', {'count': 0, 'total_cpu': 0, 'total_ram': 0})
         jobs = workload_data.get('job', {'count': 0, 'total_cpu': 0, 'total_ram': 0})
         apps = workload_data.get('application', {'count': 0, 'total_cpu': 0, 'total_ram': 0})
@@ -129,10 +129,12 @@ class AlertsManager:
             datetime=datetime.now().strftime("%Y-%m-%d %I:%M %p")
         )
 
-    def alert_main(self, cutoff_age_seconds):
+    def alert_main(self, cutoff_age_seconds, custom_recipients=None):
         logging.info(f"Running Monitoring Script for pods older than {cutoff_age_seconds}s ...")
         zombies, _ = workload_manager.cmlapi_manager.workload_report(cutoff_age_seconds, zombies_only=True)
         zombies = workload_manager.group_workload_by_id(zombies)
+
+        recipients = custom_recipients if custom_recipients else self.alert_recipient_emails
 
         if len(zombies) > 0:
             logging.info(f"Zombie Sessions detected, Sending Alert Email ...")
@@ -147,16 +149,18 @@ class AlertsManager:
                     self.sender_email, \
                     subject=self.smtp_alert_subject, \
                     content=html_content, \
-                    recipient_emails=self.alert_recipient_emails)
+                    recipient_emails=recipients)
             elif OUTPUT == "json":
                 pprint(zombies)
         else:
             logging.info(f"No Zombie Sessions detected")
 
-    def report_main(self, cutoff_age_seconds):
+    def report_main(self, cutoff_age_seconds, custom_recipients=None):
         logging.info(f"Running Report Script for pods older than {cutoff_age_seconds}s ...")
         workloads, _ = workload_manager.cmlapi_manager.workload_report(cutoff_age_seconds)
         workloads = workload_manager.group_workload_by_id(workloads)
+        
+        recipients = custom_recipients if custom_recipients else self.report_recipient_emails
 
         if len(workloads) > 0:
             logging.info(f"Running Sessions detected, Sending Report Email ...")
@@ -166,16 +170,16 @@ class AlertsManager:
             logging.info(f"Creating Report Email ...")
             html_content = self.report_email_content(df, report_file_path)
 
-            df = df.drop('show_full_name', axis=1)
-            df = df.drop('role', axis=1)
-            df = df.drop('parent', axis=1)
-            df = df.drop('has_sub_workload', axis=1)
-            df = df.drop('sub_workload', axis=1)
-            df = df.drop('namespace_url', axis=1)
-            df = df.drop('workload_url', axis=1)
-            df = df.drop('age_seconds', axis=1)
-            df = df.drop('cpu', axis=1)
-            df = df.drop('ram', axis=1)
+            df = df.drop('show_full_name', axis=1, errors='ignore')
+            df = df.drop('role', axis=1, errors='ignore')
+            df = df.drop('parent', axis=1, errors='ignore')
+            df = df.drop('has_sub_workload', axis=1, errors='ignore')
+            df = df.drop('sub_workload', axis=1, errors='ignore')
+            df = df.drop('namespace_url', axis=1, errors='ignore')
+            df = df.drop('workload_url', axis=1, errors='ignore')
+            df = df.drop('age_seconds', axis=1, errors='ignore')
+            df = df.drop('cpu', axis=1, errors='ignore')
+            df = df.drop('ram', axis=1, errors='ignore')
 
             df = df[["id", "namespace", "project", "workload_type", "name", "status", "reason", "editor_name", "editor_version", "Resource Profile", "user", "full_name", "age", "start_time", "creation_time"]]
 
@@ -200,7 +204,7 @@ class AlertsManager:
                 self.sender_email, \
                 subject=self.smtp_report_subject, \
                 content=html_content, \
-                recipient_emails=self.report_recipient_emails, \
+                recipient_emails=recipients, \
                 attachments=[report_file_path])
 
             # remove file after sending email
@@ -279,6 +283,7 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--cutoff", type=str, required=True, help="-c|--cutoff <CUT_OFF_AGE>")
     parser.add_argument("-l", "--log", type=str, default="cmlmonitor.log", help="-l|--log <log file path")
     parser.add_argument("-o", "--output", type=str, choices=["smtp", "json"], default="smtp", help="--output <smtp,json>")
+    parser.add_argument("--recipients", type=str, help="Comma separated list of emails for dry run")
     args = parser.parse_args()
 
     if args.dry_run:
@@ -303,6 +308,8 @@ if __name__ == "__main__":
         cutoff_age_seconds = age_toseconds(split_age(args.cutoff))
         MODE = args.mode
         OUTPUT = args.output
+        custom_recipients = args.recipients.split(',') if args.recipients else None
+
         if args.dry_run:
             # exit if smtp is disabled by admin
             if not alerts_manager.alerts_enabled:
@@ -310,9 +317,9 @@ if __name__ == "__main__":
 
             logging.info("Starting Dry Run ...")
             if MODE == "alert":
-                alerts_manager.alert_main(cutoff_age_seconds)
+                alerts_manager.alert_main(cutoff_age_seconds, custom_recipients)
             elif MODE == "report":
-                alerts_manager.report_main(cutoff_age_seconds)
+                alerts_manager.report_main(cutoff_age_seconds, custom_recipients)
             else:
                 raise RuntimeError("Invalid Running Mode")
         else:

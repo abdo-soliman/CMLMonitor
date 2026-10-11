@@ -46,16 +46,28 @@ class WorkloadManager():
 
     def fetch_and_cache(self):
         """Fetches data from CML API, processes it, and caches it in Valkey."""
-        logging.info("Fetching workload data from CML API...")
+        if not self.valkey.set("cml_workload_sync_lock", "locked", nx=True, ex=300):
+            return False, "A workload sync is already in progress."
+
         try:
+            self.valkey.set("cml_workload_sync_status", "running")
+            logging.info("Fetching workload data from CML API...")
+            
             raw_workloads, search_data = self.cmlapi_manager.workload_report()
             grouped_workloads = self.group_workload_by_id(raw_workloads)
 
             self.valkey.set("cml_workloads", json.dumps(grouped_workloads, cls=DateTimeEncoder))
             self.valkey.set("cml_search_data", json.dumps(search_data, cls=DateTimeEncoder))
+
             logging.info("Successfully updated Valkey cache.")
+            self.valkey.set("cml_workload_sync_status", "success")
+            return True, "Workload cache updated."
         except Exception as e:
             logging.error(f"Error fetching/caching data: {e}")
+            self.valkey.set("cml_workload_sync_status", "failed")
+            return False, str(e)
+        finally:
+            self.valkey.delete("cml_workload_sync_lock")
 
     def get(self, user, filter=None, search_filter=None, search_value=None, order_by=None, desc=None):
         # Read the single source of truth from Valkey
@@ -240,7 +252,7 @@ class WorkloadManager():
                 if parent:
                     workload["workload_type"] = parent["workload_type"]
 
-                if workload["status"] == WorkloadStatus.RUNNING:
+                if workload["status"] == WorkloadStatus.RUNNING or (workload["status"] == WorkloadStatus.PENDING and workload["age_seconds"] < 120):
                     has_no_running_sub_workloads = False
 
                 items.append(workload)

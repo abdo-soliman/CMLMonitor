@@ -64,6 +64,9 @@
     </nav>
 
     <div class="main-content">
+        <!-- Flash Message Container -->
+        <div id="flash-container" class="position-fixed top-0 start-50 translate-middle-x p-3" style="z-index: 1060; margin-top: 60px; min-width: 350px;"></div>
+
         {% if not cml_configured %}
             <div class="container text-center mt-5 pt-5">
                 <i class="fa-solid fa-triangle-exclamation text-warning mb-4" style="font-size: 4rem;"></i>
@@ -97,7 +100,10 @@
 
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <h2 class="d-flex">Active Workload</h2>    
-                <button class="d-flex btn btn-primary btn-sm" style="height: 35px" onclick="refreshData()">Refresh Data</button>
+                <button id="btnRefreshData" class="d-flex align-items-center justify-content-center btn btn-primary btn-sm" style="height: 35px; min-width: 120px;" onclick="refreshData()">
+                    <span class="spinner-border spinner-border-sm d-none me-2" role="status" aria-hidden="true"></span>
+                    <span class="btn-text">Refresh Workload</span>
+                </button>
             </div>
 
             <div class="controls-area">
@@ -184,8 +190,10 @@
                 <div class="d-flex justify-content-end align-items-center p-3"></div>
 
                 <div class="pagination-container d-flex justify-content-end align-items-center p-3">
-                    <button class="btn btn-link" style="text-decoration: none;" tooltip="Download Excel Report" tooltip-placement="bottom" tooltip-animation="false" tooltip-append-to-body="true" onclick="downloadReport()">
-                        <i class="fa fa-download" style="padding: 10px;"></i>Download
+                    <button id="btnDownloadReport" class="btn btn-link text-decoration-none d-flex align-items-center" tooltip="Download Excel Report" tooltip-placement="bottom" tooltip-animation="false" tooltip-append-to-body="true" onclick="downloadReport()">
+                        <span class="spinner-border spinner-border-sm d-none me-2" role="status" aria-hidden="true"></span>
+                        <i class="fa fa-download download-icon me-1" style="padding: 10px;"></i>
+                        <span class="btn-text">Download</span>
                     </button>
 
                     <nav aria-label="Table pagination" class="me-3">
@@ -401,36 +409,6 @@
             </a>
         </div>
     </footer>
-
-    <div class="modal fade" id="loadingModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered modal-sm">
-            <div class="modal-content">
-                <div class="modal-body text-center p-4">
-                    <div class="spinner-border text-primary mb-3" role="status">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <h6 class="mb-0">Refreshing Data...</h6>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal fade" id="errorModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered modal-sm">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title text-danger"><i class="fa-solid fa-circle-exclamation me-2"></i>Error</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body text-center p-4">
-                    Failed to refresh data. Please try again.
-                </div>
-                <div class="modal-footer justify-content-center border-0">
-                    <button type="button" class="btn btn-danger px-4" data-bs-dismiss="modal">OK</button>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <script src="static/js/bootstrap5.3.0.bundle.min.js"></script>
     <script>

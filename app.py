@@ -1,4 +1,5 @@
 import os
+import sys
 
 os.chdir(os.environ["WORK_DIR"])
 
@@ -6,24 +7,27 @@ import io
 import ast
 import time
 import json
+import logging
 import tempfile
 import threading
+import subprocess
 import pandas as pd
-import process_manager
 from sqlalchemy import event
-from extensions import db, app
 from flask_migrate import Migrate
 from pydantic import ValidationError
+from werkzeug.security import check_password_hash, generate_password_hash
+from flask_login import LoginManager, login_user, login_required, current_user, logout_user
+from flask import Flask, flash, render_template, request, redirect, url_for, jsonify, send_file, current_app
+
+import process_manager
+from extensions import db, app
 from cmlmonitor_db import init_configs
 from smtp_utils import smtp_test_email
 from models import User, Config, Runtime
 from cmlapi_manager import CMLAPIManager
 from workload_manager import WorkloadManager
-from werkzeug.security import check_password_hash, generate_password_hash
 from schemas import AdminSchema, SetupSchema, LDAPSchema, CMLSchema, AlertsSchema
-from flask_login import LoginManager, login_user, login_required, current_user, logout_user
 from ldap_utils import is_ldap_enabled, authenticate_and_user_data, validate_ldap_search, search_ldap_user
-from flask import Flask, flash, render_template, request, redirect, url_for, jsonify, send_file, current_app
 from utils import WorkloadType, SearchFilters, OrderByFilters, pagination_to_indecies, is_none_or_empty, keep_only_arabic
 
 
@@ -36,6 +40,8 @@ migrate = Migrate(app, db, render_as_batch=True)
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
+login_manager.login_message = None
+
 cmlapi_manager = CMLAPIManager()
 workload_manager = None
 APP_VERSION = "2.0"
@@ -580,6 +586,39 @@ def test_smtp_connection():
         return jsonify({"success": True, "message": "SMTP connection successful!"})
 
     return jsonify({"success": False, "message": message})
+
+
+@app.route('/api/config/dry-run', methods=['POST'])
+@login_required
+def api_config_dry_run():
+    if not current_user.config_admin:
+        return jsonify({"success": False, "message": "Unauthorized"}), 403
+
+    data = request.json
+    mode = data.get('mode')
+    cutoff = data.get('cutoff')
+    recipients = data.get('recipients', [])
+
+    if not mode or not cutoff or not recipients:
+        return jsonify({"success": False, "message": "Mode, Cutoff, and Recipients are required."}), 400
+
+    recipients_str = ",".join(recipients)
+
+    cmd = [
+        sys.executable, 
+        "alerts_manager.py", 
+        "--dry-run", 
+        "-m", mode, 
+        "-c", cutoff, 
+        "--recipients", recipients_str
+    ]
+
+    try:
+        # Use Popen to launch the process in the background and return instantly
+        subprocess.Popen(cmd, cwd=os.environ.get("WORK_DIR", "."))
+        return jsonify({"success": True, "message": f"{mode.capitalize()} Dry Run scheduled. Check the inbox shortly!"})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Server Error: {str(e)}"}), 500
 
 
 @app.route('/api/setup/save', methods=['POST'])
@@ -1287,57 +1326,41 @@ def api_delete_user():
 
 
 # --- API Endpoints (For AJAX) ---
-@app.route('/api/refresh')
+@app.route('/api/refresh', methods=['POST'])
 @login_required
 def refresh_data():
-    """Returns the current data as JSON. 
-    We randomly update a value here to simulate live changes."""
+    """Endpoint to trigger background workload sync."""
+    if not current_user or current_user.is_anonymous:
+        return jsonify({"error": "Unauthorized"}), 401
+        
+    try:
+        if not workload_manager:
+            return jsonify({"success": False, "message": "Workload manager not initialized."}), 500
+
+        status = workload_manager.valkey.get("cml_workload_sync_status")
+        if status == "running":
+            return jsonify({"success": False, "message": "A workload sync is already in progress. Please wait."}), 429
+            
+        workload_manager.valkey.set("cml_workload_sync_status", "running")
+        threading.Thread(target=workload_manager.fetch_and_cache, daemon=True).start()
+        
+        return jsonify({"success": True, "message": "Workload sync started in background."})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Failed to start refresh: {str(e)}"}), 500
+
+
+@app.route('/api/refresh/status', methods=['GET'])
+@login_required
+def api_refresh_status():
+    """Endpoint for the UI to poll the progress of the background workload sync."""
     if not current_user or current_user.is_anonymous:
         return jsonify({"error": "Unauthorized"}), 401
 
-    page_size = request.args.get('pageSize', default=25, type=int)
-    page_number = request.args.get('pageNumber', default=1, type=int)
-    filter = request.args.get('filter', default="all", type=str)
-    search_filter = request.args.get('searchFilter', default="all", type=str)
-    search_value = request.args.get('searchValue', default=None, type=str)
-    order_by_filter = request.args.get('orderBy', default="all", type=str)
+    if not workload_manager:
+        return jsonify({"status": "failed"})
 
-    raw_desc = request.args.get('desc', default='true').lower()
-    if raw_desc not in ['true', 'false', '1', '0']:
-        return jsonify({"error": "desc must be a boolean"}), 400
-    order_by_desc = raw_desc in ['true', '1']
-    
-    try:
-        new_filter = WorkloadType(filter)
-        new_search_filter = SearchFilters(search_filter)
-        new_order_by_filter = OrderByFilters(order_by_filter)
-
-        workload_manager.refresh()
-        workloads, counts, filters = workload_manager.get(current_user, new_filter, new_search_filter, search_value, order_by=new_order_by_filter, desc=order_by_desc)
-
-
-        start_index, end_index, page_number, page_size, max_number_of_pages = pagination_to_indecies(page_size, page_number, len(workloads))
-        search_data_json = json.dumps(workload_manager.get_search_data(), default=list)
-
-        return jsonify({
-            "page_number": page_number,
-            "page_size": page_size,
-            "max_pages": max_number_of_pages,
-            "filter": filters["filter"],
-            "search_filter": filters["search_filter"],
-            "search_value": filters["search_value"],
-            "search_data": search_data_json,
-            "order_by_filter": filters["order_by_filter"],
-            "desc": filters["desc"],
-            "total_number_of_workload": counts[WorkloadType.ALL.value],
-            "num_sessions": counts[WorkloadType.SESSION.value],
-            "num_applications": counts[WorkloadType.APPLICATION.value],
-            "num_jobs": counts[WorkloadType.JOB.value],
-            "num_orphans": counts[WorkloadType.ORPHAN.value],
-            "payload": workloads[start_index:end_index]
-        })
-    except ValueError:
-        return jsonify({"error": "Invalid filter choice"}), 400
+    status = workload_manager.valkey.get("cml_workload_sync_status") or "idle"
+    return jsonify({"status": status})
 
 
 @app.route('/api/data')
@@ -1391,26 +1414,37 @@ def get_data():
 
 
 @app.route('/api/report')
+@login_required
 def download_excel():
-    workloads = workload_manager.expand_sub_workloads()
-    df = pd.DataFrame(workloads)
-    df = df.drop('show_full_name', axis=1)
-    df = df.drop('age_seconds', axis=1)
+    try:
+        workloads = workload_manager.expand_sub_workloads()
+        if not workloads:
+            return jsonify({"error": "No workloads available to export."}), 400
 
-    buffer = io.BytesIO()
-    # Write the DataFrame to the buffer using the Excel writer using 'openpyxl' engine
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='CML Workload Report')
+        df = pd.DataFrame(workloads)
+        
+        # Safely drop columns if they exist
+        df.drop(columns=['show_full_name', 'age_seconds'], errors='ignore', inplace=True)
 
-    # Reset the buffer's position to the beginning
-    buffer.seek(0)
+        # CRITICAL FIX: Excel does not support timezone-aware datetimes.
+        # We must localize them to None (naive) before exporting.
+        for col in df.select_dtypes(['datetimetz']).columns:
+            df[col] = df[col].dt.tz_localize(None)
 
-    return send_file(
-        buffer,
-        as_attachment=True,
-        download_name=f"report.xlsx",
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='CML Workload Report')
+
+        buffer.seek(0)
+        return send_file(
+            buffer,
+            as_attachment=True,
+            download_name=f"report.xlsx",
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    except Exception as e:
+        logging.error(f"Failed to generate report: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/runtimes/sync', methods=['POST'])

@@ -1,3 +1,5 @@
+let refreshPollInterval = null;
+
 function renderTable(workloads) {
     const tbody = document.getElementById('table-body');
     let html = '';
@@ -272,73 +274,119 @@ function fetchData(direction = null, pageSize = null, filter = null, searchValue
 }
 
 
-function refreshData() {
-    const loadingModalEl = document.getElementById('loadingModal');
-    const errorModalEl = document.getElementById('errorModal');
-    const loadingModal = bootstrap.Modal.getOrCreateInstance(loadingModalEl);
-    const errorModal = bootstrap.Modal.getOrCreateInstance(errorModalEl);
+async function refreshData() {
+    const btn = document.getElementById('btnRefreshData');
+    const spinner = btn.querySelector('.spinner-border');
+    const btnText = btn.querySelector('.btn-text');
 
-    loadingModal.show();
+    // Disable button and show spinner
+    btn.disabled = true;
+    spinner.classList.remove('d-none');
+    btnText.innerText = 'Refreshing...';
 
-    const baseUrl = `${window.location.href}api/refresh`;
+    try {
+        const response = await fetch('/api/refresh', { method: 'POST' });
+        const data = await response.json();
 
-    const params = {
-        pageSize: PAGE_SIZE,
-        pageNumber: CURRENT_PAGE,
-        filter: FILTER,
-        searchFilter: SEARCH_FILTER,
-        searchValue: SEARCH_VALUE,
-        orderBy: ORDER_BY_FILTER,
-        desc: ORDER_BY_DESC
-    };
+        if (response.ok && data.success) {
+            // Background thread successfully started. Begin polling the status.
+            pollRefreshStatus();
+        } else {
+            // Handle 429 Too Many Requests or lock rejections
+            showFlashMessage(data.message || 'Failed to start workload refresh.', 'danger');
+            resetRefreshButton();
+        }
+    } catch (err) {
+        console.error("Failed to trigger refresh:", err);
+        showFlashMessage('A network error occurred while triggering refresh.', 'danger');
+        resetRefreshButton();
+    }
+}
 
-    const url = new URL(baseUrl);
-    url.search = new URLSearchParams(params).toString();
 
-    fetch(url)
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+function pollRefreshStatus() {
+    const startTime = Date.now();
+    
+    // Clear any existing intervals just in case
+    if (refreshPollInterval) clearInterval(refreshPollInterval);
+
+    refreshPollInterval = setInterval(async () => {
+        // Hard timeout: Stop polling after 5 minutes
+        if (Date.now() - startTime > 300000) {
+            clearInterval(refreshPollInterval);
+            showFlashMessage('Sync request timed out after 5 minutes.', 'danger');
+            resetRefreshButton();
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/refresh/status');
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                clearInterval(refreshPollInterval);
+                showFlashMessage('Workloads refreshed successfully.', 'success');
+                // Rely on the existing robust fetchData() to pull the new data and apply all current UI filters
+                fetchData(); 
+                resetRefreshButton();
+            } else if (data.status === 'failed' || data.status === 'timeout') {
+                clearInterval(refreshPollInterval);
+                showFlashMessage('Failed to refresh workloads on the server.', 'danger');
+                resetRefreshButton();
             }
-            return response.json();
-        })
-        .then(data => {
-            MAX_PAGES = data.max_pages;
-            CURRENT_PAGE = data.page_number;
-            PAGE_SIZE = data.page_size;
-            FILTER = data.filter;
-            SEARCH_FILTER = data.search_filter;
-            SEARCH_VALUE = data.search_value;
-            SEARCH_DATA = JSON.parse(data.search_data);
-
-            ORDER_BY_FILTER = data.order_by_filter;
-            ORDER_BY_DESC = data.desc;
-
-            NUM_SESSIONS = data.num_sessions;
-            NUM_APPLICATIONS = data.num_applications;
-            NUM_JOBS = data.num_jobs;
-            NUM_ORPHANS = data.num_orphans || 0;
-            TOTAL_WORKLOAD = data.total_number_of_workload;
-
-            updatePagination();
-            updateFilter();
-            updateSearch();
-            updateSort();
-            renderTable(data.payload);
-
-            setTimeout(() => { loadingModal.hide(); }, 500);
-        })
-        .catch(error => {
-            console.error('Error fetching data:', error);
+            // If status is 'running' or 'idle', do nothing. It will poll again in 3 seconds.
             
-            setTimeout(() => {
-                loadingModalEl.addEventListener('hidden.bs.modal', function triggerErrorModal() {
-                    errorModal.show();
-                }, { once: true });
-                
-                loadingModal.hide();
-            }, 500);
-        });
+        } catch (err) {
+            console.error("Polling error:", err);
+            // Don't stop polling on a single network blip, just wait for the next tick
+        }
+    }, 3000); // Check status every 3 seconds
+}
+
+
+function resetRefreshButton() {
+    const btn = document.getElementById('btnRefreshData');
+    if (!btn) return;
+    const spinner = btn.querySelector('.spinner-border');
+    const btnText = btn.querySelector('.btn-text');
+    
+    if (refreshPollInterval) {
+        clearInterval(refreshPollInterval);
+        refreshPollInterval = null;
+    }
+
+    btn.disabled = false;
+    spinner.classList.add('d-none');
+    btnText.innerText = 'Refresh Data';
+}
+
+
+function showFlashMessage(message, type = 'success') {
+    const container = document.getElementById('flash-container');
+    if (!container) return;
+
+    // Force the container to the top-middle of the screen
+    container.className = 'position-fixed top-0 start-50 translate-middle-x p-3';
+    container.style.minWidth = '350px';
+
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type} alert-dismissible fade show shadow-sm text-center`;
+    alertDiv.role = 'alert';
+    
+    const icon = type === 'success' ? 'fa-circle-check' : 'fa-circle-exclamation';
+    
+    alertDiv.innerHTML = `
+        <i class="fa-solid ${icon} me-2"></i>${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    `;
+    
+    container.appendChild(alertDiv);
+
+    // Auto dismiss after 5 seconds
+    setTimeout(() => {
+        alertDiv.classList.remove('show');
+        setTimeout(() => alertDiv.remove(), 150); // Wait for Bootstrap fade transition
+    }, 5000);
 }
 
 
@@ -351,10 +399,27 @@ function filterButtonClickHandler(workloadType, btn) {
 
 
 function downloadReport() {
+    const btn = document.getElementById('btnDownloadReport');
+    const spinner = btn.querySelector('.spinner-border');
+    const icon = btn.querySelector('.download-icon');
+    
+    // Disable button and swap icon for spinner
+    btn.disabled = true;
+    spinner.classList.remove('d-none');
+    icon.classList.add('d-none');
+
     fetch('/api/report')
-    .then(response => {
+    .then(async response => {
         if (response.ok) return response.blob(); 
-        throw new Error('Network response was not ok.');
+        
+        // If the server threw a 400/500 error, try to extract the JSON message
+        let errMsg = 'Network response was not ok.';
+        try {
+            const errData = await response.json();
+            if (errData.error) errMsg = errData.error;
+        } catch (e) {}
+        
+        throw new Error(errMsg);
     })
     .then(blob => {
         const url = window.URL.createObjectURL(blob);
@@ -368,13 +433,23 @@ function downloadReport() {
         a.download = `report_${formattedDate}.xlsx`; 
 
         document.body.appendChild(a);
-        
         a.click(); 
         
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
+        
+        showFlashMessage('Report downloaded successfully.', 'success');
     })
-    .catch(error => console.error('Download failed:', error));
+    .catch(error => {
+        console.error('Download failed:', error);
+        showFlashMessage(`Download failed: ${error.message}`, 'danger');
+    })
+    .finally(() => {
+        // Always restore the button state, even on failure
+        btn.disabled = false;
+        spinner.classList.add('d-none');
+        icon.classList.remove('d-none');
+    });
 }
 
 
