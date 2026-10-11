@@ -209,9 +209,14 @@ class WorkloadManager():
             logging.error(f"Error executing Lightweight Jobs cache: {e}")
             return False, str(e)
 
-    def get_jobs(self):
+    def get_jobs(self, user):
         cached_data = self.valkey.get("cml_jobs")
-        return json.loads(cached_data, object_hook=datetime_decoder) if cached_data else []
+        jobs = json.loads(cached_data, object_hook=datetime_decoder) if cached_data else []
+
+        if not user.is_admin:
+            jobs = [job for job in jobs if job["username"] == user.username]
+
+        return jobs
 
     def group_workload_by_id(self, workloads):
         cached_jobs_str = self.valkey.get("cml_jobs")

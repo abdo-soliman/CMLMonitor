@@ -1463,9 +1463,6 @@ def api_sync_runtimes():
 @app.route('/jobs')
 @login_required
 def jobs_page():
-    if not current_user.is_admin:
-        return redirect(url_for('home'))
-
     user_data = {
         "username": current_user.username,
         "fullname": current_user.fullname,
@@ -1479,14 +1476,11 @@ def jobs_page():
 @app.route('/api/jobs')
 @login_required
 def api_jobs():
-    if not current_user.is_admin:
-        return jsonify({"error": "Unauthorized"}), 403
-
     page_size = request.args.get('size', default=25, type=int)
     page_number = request.args.get('page', default=1, type=int)
     search_value = request.args.get('search', default="", type=str).strip().lower()
 
-    jobs_data = workload_manager.get_jobs() if workload_manager else []
+    jobs_data = workload_manager.get_jobs(current_user) if workload_manager else []
 
     # Search filter by Name or Script
     if search_value:
