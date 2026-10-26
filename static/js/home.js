@@ -1,5 +1,260 @@
 let refreshPollInterval = null;
 
+const ADVANCED_SEARCH_CONFIG = [
+    { label: "Username", value: "username" },
+    { label: "Project", value: "project" },
+    { label: "Session Name", value: "session_name" },
+    { label: "Namespace", value: "namespace" },
+    { label: "Session ID", value: "session_id" },
+    { label: "Status", value: "status" },
+    { label: "Age", value: "age" },
+    { label: "Resources", value: "resources" }
+];
+
+let advancedSearchObj = null;
+
+document.addEventListener('DOMContentLoaded', function () {
+    advancedSearchObj = initAdvancedSearch(
+        'advanced-search-search-container', 
+        'advanced-search-input', 
+        'advanced-search-dropdown', 
+        'advanced-search-param-hint', 
+        'advanced-search-chips', 
+        ADVANCED_SEARCH_CONFIG, 
+        () => SEARCH_DATA, 
+        (filters) => fetchData("first")
+    );
+
+    const pageSizeDropdownMenu = document.getElementById('page-size-dropdown');
+    pageSizeDropdownMenu.addEventListener('change', (event) => {
+        const selectedValue = Number.parseInt(event.target.value, 10);
+        fetchData(null, selectedValue);
+    });
+
+    fetchData();
+    setInterval(fetchData, 60000);
+});
+
+// --- ADVANCED SEARCH COMPONENT LOGIC ---
+function initAdvancedSearch(containerId, inputId, dropdownId, hintId, chipsId, config, getSearchDataCallback, onSearchCallback) {
+    const inputEl = document.getElementById(inputId);
+    const dropdownEl = document.getElementById(dropdownId);
+    const hintEl = document.getElementById(hintId);
+    const chipsContainer = document.getElementById(chipsId);
+    const containerEl = document.getElementById(containerId);
+
+    let activeFilters = [];
+    let isSelectingParam = true;
+    let currentSelectedParam = null;
+    let activeDropdownIndex = -1;
+
+    // 1. Create a safe identifier for the dynamic window function (replace hyphens with underscores)
+    const safeContainerId = containerId.replace(/-/g, '_');
+
+    function renderChips() {
+        chipsContainer.innerHTML = '';
+        activeFilters.forEach((f, idx) => {
+            const chip = document.createElement('div');
+            chip.className = 'advanced-search-chip';
+            const conf = config.find(c => c.value === f.param);
+            const label = conf ? conf.label : f.param;
+            chip.innerHTML = `
+                <span class="cancel-btn me-2" onclick="window.removeAdvancedSearchFilter_${safeContainerId}(${idx})"><i class="fa-solid fa-circle-xmark"></i></span>
+                <span class="param-name">${escapeHtml(label)}:</span> 
+                <span class="param-value">${escapeHtml(f.value)}</span> 
+            `;
+            chipsContainer.appendChild(chip);
+        });
+    }
+
+    // Use the sanitized name for the global window function
+    window[`removeAdvancedSearchFilter_${safeContainerId}`] = function(idx) {
+        activeFilters.splice(idx, 1);
+        renderChips();
+        resetInput();
+        onSearchCallback(activeFilters);
+        inputEl.focus();
+    };
+
+    function resetInput() {
+        isSelectingParam = true;
+        currentSelectedParam = null;
+        inputEl.value = '';
+        inputEl.placeholder = activeFilters.length === 0 ? 'Search...' : '';
+        hintEl.classList.add('d-none');
+        hintEl.innerText = '';
+        hideDropdown();
+    }
+
+    function getAvailableParams() {
+        const usedParams = activeFilters.map(f => f.param);
+        return config.filter(c => !usedParams.includes(c.value));
+    }
+
+    function showDropdown(items, isParamMode) {
+        dropdownEl.innerHTML = '';
+        activeDropdownIndex = -1;
+        if (!items || items.length === 0) {
+            hideDropdown();
+            return;
+        }
+        items.forEach((item, idx) => {
+            const div = document.createElement('div');
+            div.className = 'advanced-search-dropdown-item';
+            div.innerText = isParamMode ? item.label : String(item);
+            div.onmousedown = (e) => {
+                e.preventDefault(); 
+                if (isParamMode) selectParam(item);
+                else addFilter(item);
+            };
+            dropdownEl.appendChild(div);
+        });
+        dropdownEl.style.display = 'block';
+    }
+
+    function hideDropdown() {
+        // 3. Clear HTML so hidden Ghost items don't intercept Enter key events
+        dropdownEl.innerHTML = ''; 
+        dropdownEl.style.display = 'none';
+        activeDropdownIndex = -1;
+    }
+
+    function selectParam(paramObj) {
+        isSelectingParam = false;
+        currentSelectedParam = paramObj;
+        inputEl.value = '';
+        inputEl.placeholder = '';
+        hintEl.innerText = paramObj.label + ':';
+        hintEl.classList.remove('d-none');
+        inputEl.focus();
+        showValues('');
+    }
+
+    function addFilter(value) {
+        if (!value || !String(value).trim()) return;
+        activeFilters.push({ param: currentSelectedParam.value, value: String(value).trim() });
+        renderChips();
+        resetInput();
+        onSearchCallback(activeFilters);
+        
+        // 2. Explicitly force focus and immediately show the params again
+        inputEl.focus();
+        showParams('');
+    }
+
+    function showParams(filterText = '') {
+        const available = getAvailableParams();
+        const filtered = available.filter(c => c.label.toLowerCase().includes(filterText.toLowerCase()));
+        showDropdown(filtered, true);
+    }
+
+    function showValues(filterText = '') {
+        const searchData = getSearchDataCallback();
+        let values = searchData[currentSelectedParam.value] || [];
+        if (filterText) {
+            values = values.filter(v => String(v).toLowerCase().includes(filterText.toLowerCase()));
+        }
+        showDropdown(values, false);
+    }
+
+    function updateDropdownSelection() {
+        const items = dropdownEl.querySelectorAll('.advanced-search-dropdown-item');
+        items.forEach((item, idx) => {
+            if (idx === activeDropdownIndex) item.classList.add('active');
+            else item.classList.remove('active');
+        });
+        if (activeDropdownIndex >= 0 && items[activeDropdownIndex]) {
+            items[activeDropdownIndex].scrollIntoView({ block: 'nearest' });
+        }
+    }
+
+    // Force focus to input if the user clicks anywhere in the empty space of the search bar
+    containerEl.addEventListener('click', (e) => {
+        if (e.target !== inputEl && e.target !== dropdownEl && !e.target.closest('.cancel-btn')) {
+            inputEl.focus();
+        }
+    });
+
+    inputEl.addEventListener('focus', () => {
+        if (isSelectingParam) showParams(inputEl.value);
+        else showValues(inputEl.value);
+    });
+
+    inputEl.addEventListener('blur', () => {
+        setTimeout(() => {
+            // Only hide the dropdown if focus actually left the search container
+            if (!containerEl.contains(document.activeElement)) {
+                hideDropdown();
+                if (!isSelectingParam && inputEl.value.trim() === '') {
+                    resetInput();
+                }
+            }
+        }, 150);
+    });
+
+    inputEl.addEventListener('input', (e) => {
+        const val = e.target.value;
+        if (isSelectingParam) showParams(val);
+        else showValues(val);
+    });
+
+    inputEl.addEventListener('keydown', (e) => {
+        const isDropdownVisible = dropdownEl.style.display === 'block';
+        const items = isDropdownVisible ? dropdownEl.querySelectorAll('.advanced-search-dropdown-item') : [];
+        
+        if (e.key === 'Backspace' && inputEl.value === '') {
+            if (!isSelectingParam) {
+                resetInput();
+                showParams('');
+            } else if (activeFilters.length > 0) {
+                activeFilters.pop();
+                renderChips();
+                onSearchCallback(activeFilters);
+                showParams('');
+            }
+        } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (activeDropdownIndex < items.length - 1) {
+                activeDropdownIndex++;
+                updateDropdownSelection();
+            }
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (activeDropdownIndex > 0) {
+                activeDropdownIndex--;
+                updateDropdownSelection();
+            }
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            
+            if (activeDropdownIndex >= 0 && activeDropdownIndex < items.length) {
+                items[activeDropdownIndex].onmousedown(new MouseEvent('mousedown'));
+            } else {
+                if (isSelectingParam && items.length > 0) {
+                    items[0].onmousedown(new MouseEvent('mousedown'));
+                } else if (!isSelectingParam) {
+                    if (inputEl.value.trim() !== '') {
+                        addFilter(inputEl.value);
+                    } else if (items.length > 0) {
+                        items[0].onmousedown(new MouseEvent('mousedown'));
+                    }
+                }
+            }
+        }
+    });
+
+    return {
+        getActiveFilters: () => activeFilters,
+        clearFilters: () => {
+            activeFilters = [];
+            renderChips();
+            resetInput();
+        }
+    };
+}
+// --- END SEARCH LOGIC ---
+
+
 function renderTable(workloads) {
     const tbody = document.getElementById('table-body');
     let html = '';
@@ -27,7 +282,6 @@ function renderTable(workloads) {
             // Construct Name (Handle Nulls)
             const nameHtml = workload.name ? workload.name : `<em class="text-muted small">N/A</em>`;
 
-            // Construct Reason Text (Now side-by-side)
             const reasonHtml = workload.reason 
                 ? `<span class="text-muted small ms-2" title="Reason: ${workload.reason}"><i class="fa-solid fa-circle-info me-1"></i>${workload.reason}</span>`
                 : '';
@@ -37,9 +291,7 @@ function renderTable(workloads) {
                     <td class="text-nowrap">
                         ${sub_workload_toggle}
                     </td>
-                    <td>
-                        <strong>${workload.workload_type}</strong>
-                    </td>
+                    <td><strong>${workload.workload_type}</strong></td>
                     <td>
                         <strong>${workload.user}</strong>
                         ${workload.show_full_name ? `<br><span style="color:#666666;">${workload.full_name}</span>` : ''}
@@ -48,16 +300,12 @@ function renderTable(workloads) {
                         <strong>${workload.project}</strong>${workloadUrlHtml}<br>
                         <span style="color:#666666;">${nameHtml}</span>
                     </td>
+                    <td>${editorVersionHtml}</td>
                     <td>
-                        ${editorVersionHtml}
-                    </td>
-                    <td>
-                        <!-- IMPROVED NAMESPACE LINK -->
                         <a href="${workload.namespace_url}" target="_blank" class="text-primary fw-semibold text-decoration-none" title="View in Kubernetes">${workload.namespace} <i class="fa-solid fa-arrow-up-right-from-square small ms-1"></i></a><br>
                         <span class="badge-id text-muted small">${workload.id}</span>
                     </td>
                     <td>
-                        <!-- IMPROVED STATUS & REASON -->
                         <div class="d-flex align-items-center flex-wrap">
                             <span class="badge badge-schedule badge-schedule-${workload.status.toLowerCase()}">${workload.status}</span>
                             ${reasonHtml}
@@ -88,38 +336,23 @@ function renderTable(workloads) {
 
                     html += `
                         <tr class="sub-workload-row sub-workload-${workload.id}" style="display: ${EXPANDED_ROWS.includes(workload.id) ? "table-row" : "none"};">
-                            <td>
-                                <div class="ps-4">
-                                    <i class="fa-solid fa-level-up fa-rotate-90 text-muted"></i>
-                                </div>
-                            </td>
+                            <td><div class="ps-4"><i class="fa-solid fa-level-up fa-rotate-90 text-muted"></i></div></td>
                             <td><div class="ps-2">${sub.workload_type}</div></td>
-                            <td>
-                                <div class="ps-2">
-                                    ${sub.user}
-                                    ${fullname}
-                                </div>
-                            </td>
+                            <td><div class="ps-2">${sub.user}${fullname}</div></td>
                             <td>
                                 <div class="ps-2">
                                     <strong>${sub.project}</strong>${subWorkloadUrlHtml}<br>
                                     <span style="color:#888888;">${subNameHtml}</span>
                                 </div>
                             </td>
+                            <td><div class="ps-2">${subEditorVersionHtml}</div></td>
                             <td>
                                 <div class="ps-2">
-                                    ${subEditorVersionHtml}
-                                </div>
-                            </td>
-                            <td>
-                                <div class="ps-2">
-                                    <!-- IMPROVED SUB-NAMESPACE LINK -->
                                     <a href="${sub.namespace_url}" target="_blank" class="text-primary fw-semibold text-decoration-none" title="View in Kubernetes">${sub.namespace} <i class="fa-solid fa-arrow-up-right-from-square small ms-1"></i></a><br>
                                     <span class="badge-id text-muted small">${sub.id}</span>
                                 </div>
                             </td>
                             <td>
-                                <!-- IMPROVED SUB-STATUS & REASON -->
                                 <div class="d-flex align-items-center flex-wrap">
                                     <span class="badge badge-schedule badge-schedule-${sub.status.toLowerCase()}">${sub.status}</span>
                                     ${subReasonHtml}
@@ -136,78 +369,18 @@ function renderTable(workloads) {
         tbody.innerHTML = html;
 }
 
-
-function updateDataList() {
-    let data = (SEARCH_FILTER == SearchFilters.ALL) ? SEARCH_DATA[SearchFilters.USERNAME] : SEARCH_DATA[SEARCH_FILTER];
-    let html = '';
-    
-    // Safety check in case the search filter array doesn't exist in SEARCH_DATA
-    if(data && Array.isArray(data)) {
-        data.forEach(item => {
-            html += `<option value="${item}">`;
-        });
-    }
-
-    document.getElementById("search-data").innerHTML = html;
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[m]);
 }
 
 
-function updateSearch() {
-    if (Object.values(SearchFilters).includes(SEARCH_FILTER)) {
-        document.getElementById("search-filter").value = (SEARCH_FILTER == SearchFilters.ALL) ? SearchFilters.USERNAME : SEARCH_FILTER;
-        document.getElementById("search-value-input").value = SEARCH_VALUE;
-    }
-    else {
-        SEARCH_FILTER = SearchFilters.ALL;
-        document.getElementById("search-value-input").value = "";
-        document.getElementById("search-filter").value = SearchFilters.USERNAME;
-    }
-
-    updateDataList();
-}
-
-
-function searchOnEnter(event) {
-    if (event.key === "Enter") {
-        if (SEARCH_FILTER_CHANGED) {
-            SEARCH_FILTER_CHANGED = false;
-            fetchData("first", null, null, event.target.value);
-        }
-        else {
-            fetchData(null, null, null, event.target.value);
-        }
-    }
-}
-
-
-function searchInputFocus() {
-    if (SEARCH_FILTER == SearchFilters.ALL) {
-        const searchFilter = document.getElementById("search-filter").value;
-        const isValidSearchFilter = Object.values(SearchFilters).includes(searchFilter);
-        SEARCH_FILTER_CHANGED = isValidSearchFilter && searchFilter !== SEARCH_FILTER;
-        SEARCH_FILTER = (isValidSearchFilter) ? searchFilter : SEARCH_FILTER;
-        updateDataList();
-    }
-}
-
-
-function setSearchFilter(value) {
-    const isValidSearchFilter = Object.values(SearchFilters).includes(value);
-    SEARCH_FILTER_CHANGED = isValidSearchFilter && value !== SEARCH_FILTER;
-    SEARCH_FILTER = (isValidSearchFilter) ? value : SEARCH_FILTER;
-    updateDataList();
-}
-
-
-function fetchData(direction = null, pageSize = null, filter = null, searchValue=null, orderBy=null, desc=null) {
+function fetchData(direction = null, pageSize = null, filter = null, orderBy=null, desc=null) {
     const baseUrl = `${window.location.href}api/data`;
 
     const isValidFilter = Object.values(WorkloadFilters).includes(filter);
     const filterChanged = isValidFilter && filter !== FILTER;
     let toBeFilter = (isValidFilter) ? filter : FILTER;
-
-    const isValidSearchFilter = Object.values(SearchFilters).includes(SEARCH_FILTER);
-    let toBeSearchFilter = (isValidSearchFilter) ? SEARCH_FILTER : SearchFilters.ALL;
 
     let toBePageNumber = CURRENT_PAGE;
     if (filterChanged || direction === "first")
@@ -227,12 +400,13 @@ function fetchData(direction = null, pageSize = null, filter = null, searchValue
 
     let toBeDesc = (desc === null) ? ORDER_BY_DESC : desc;
 
+    const searchFiltersPayload = advancedSearchObj ? JSON.stringify(advancedSearchObj.getActiveFilters()) : '[]';
+
     const params = {
         pageSize: toBePageSize,
         pageNumber: toBePageNumber,
         filter: toBeFilter,
-        searchFilter: toBeSearchFilter,
-        searchValue: (searchValue === null) ? SEARCH_VALUE : searchValue,
+        searchFilters: searchFiltersPayload,
         orderBy: toBeOrderByFilter,
         desc: toBeDesc
     };
@@ -245,11 +419,9 @@ function fetchData(direction = null, pageSize = null, filter = null, searchValue
         .then(data => {
             MAX_PAGES = data.max_pages;
             CURRENT_PAGE = data.page_number;
-            // we are assuming server is always right
             PAGE_SIZE = data.page_size;
             FILTER = data.filter;
-            SEARCH_FILTER = data.search_filter;
-            SEARCH_VALUE = data.search_value;
+            
             SEARCH_DATA = JSON.parse(data.search_data);
 
             ORDER_BY_FILTER = data.order_by_filter;
@@ -258,15 +430,11 @@ function fetchData(direction = null, pageSize = null, filter = null, searchValue
             NUM_SESSIONS = data.num_sessions;
             NUM_APPLICATIONS = data.num_applications;
             NUM_JOBS = data.num_jobs;
-            
-            // Allow graceful fallback if the backend hasn't been updated to emit this payload key yet
             NUM_ORPHANS = data.num_orphans || 0; 
-            
             TOTAL_WORKLOAD = data.total_number_of_workload;
 
             updatePagination();
             updateFilter();
-            updateSearch();
             updateSort();
             renderTable(data.payload);
         })
@@ -279,7 +447,6 @@ async function refreshData() {
     const spinner = btn.querySelector('.spinner-border');
     const btnText = btn.querySelector('.btn-text');
 
-    // Disable button and show spinner
     btn.disabled = true;
     spinner.classList.remove('d-none');
     btnText.innerText = 'Refreshing...';
@@ -289,10 +456,8 @@ async function refreshData() {
         const data = await response.json();
 
         if (response.ok && data.success) {
-            // Background thread successfully started. Begin polling the status.
             pollRefreshStatus();
         } else {
-            // Handle 429 Too Many Requests or lock rejections
             showFlashMessage(data.message || 'Failed to start workload refresh.', 'danger');
             resetRefreshButton();
         }
@@ -326,7 +491,6 @@ function pollRefreshStatus() {
             if (data.status === 'success') {
                 clearInterval(refreshPollInterval);
                 showFlashMessage('Workloads refreshed successfully.', 'success');
-                // Rely on the existing robust fetchData() to pull the new data and apply all current UI filters
                 fetchData(); 
                 resetRefreshButton();
             } else if (data.status === 'failed' || data.status === 'timeout') {
@@ -334,13 +498,10 @@ function pollRefreshStatus() {
                 showFlashMessage('Failed to refresh workloads on the server.', 'danger');
                 resetRefreshButton();
             }
-            // If status is 'running' or 'idle', do nothing. It will poll again in 3 seconds.
-            
         } catch (err) {
             console.error("Polling error:", err);
-            // Don't stop polling on a single network blip, just wait for the next tick
         }
-    }, 3000); // Check status every 3 seconds
+    }, 3000); 
 }
 
 
@@ -365,7 +526,6 @@ function showFlashMessage(message, type = 'success') {
     const container = document.getElementById('flash-container');
     if (!container) return;
 
-    // Force the container to the top-middle of the screen
     container.className = 'position-fixed top-0 start-50 translate-middle-x p-3';
     container.style.minWidth = '350px';
 
@@ -385,7 +545,7 @@ function showFlashMessage(message, type = 'success') {
     // Auto dismiss after 5 seconds
     setTimeout(() => {
         alertDiv.classList.remove('show');
-        setTimeout(() => alertDiv.remove(), 150); // Wait for Bootstrap fade transition
+        setTimeout(() => alertDiv.remove(), 150); 
     }, 5000);
 }
 
@@ -403,7 +563,6 @@ function downloadReport() {
     const spinner = btn.querySelector('.spinner-border');
     const icon = btn.querySelector('.download-icon');
     
-    // Disable button and swap icon for spinner
     btn.disabled = true;
     spinner.classList.remove('d-none');
     icon.classList.add('d-none');
@@ -412,7 +571,6 @@ function downloadReport() {
     .then(async response => {
         if (response.ok) return response.blob(); 
         
-        // If the server threw a 400/500 error, try to extract the JSON message
         let errMsg = 'Network response was not ok.';
         try {
             const errData = await response.json();
@@ -445,7 +603,6 @@ function downloadReport() {
         showFlashMessage(`Download failed: ${error.message}`, 'danger');
     })
     .finally(() => {
-        // Always restore the button state, even on failure
         btn.disabled = false;
         spinner.classList.add('d-none');
         icon.classList.remove('d-none');
@@ -477,7 +634,7 @@ function toggleSort(orderBy, headerElement) {
         activeIcon.className = 'fa-solid fa-caret-down sort-icon ms-1';
     }
 
-    fetchData(null, null, null, null, orderBy, isDesc);
+    fetchData(null, null, null, orderBy, isDesc);
 }
 
 
@@ -531,18 +688,6 @@ function toggleSubWorkload(workloadId, btnElement) {
         icon.classList.add('fa-chevron-down');
     }
 }
-
-
-document.addEventListener('DOMContentLoaded', function () {
-    const pageSizeDropdownMenu = document.getElementById('page-size-dropdown');
-    pageSizeDropdownMenu.addEventListener('change', (event) => {
-        const selectedValue = Number.parseInt(event.target.value, 10);
-        fetchData(null, selectedValue);
-    });
-
-    // Poll every 1 min
-    setInterval(fetchData, 60000);
-});
 
 
 function updatePagination() {
@@ -605,7 +750,7 @@ function updateFilter() {
     filterSessionsCount.classList.value = "badge bg-secondary";
     filterApplicationsCount.classList.value = "badge bg-secondary";
     filterJobsCount.classList.value = "badge bg-secondary";
-    filterOrphansCount.classList.value = "badge bg-secondary";
+    if(filterOrphansCount) filterOrphansCount.classList.value = "badge bg-secondary";
 
     // Apply active styles
     if (FILTER === WorkloadFilters.SESSION) {
@@ -622,7 +767,7 @@ function updateFilter() {
     }
     else if (FILTER === WorkloadFilters.ORPHAN) {
         filterButtonOrphans.classList.value = "btn btn-primary active";
-        filterOrphansCount.classList.value = "badge";
+        if(filterOrphansCount) filterOrphansCount.classList.value = "badge";
     }
     else {
         filterButtonAll.classList.value = "btn btn-primary active";
@@ -635,26 +780,4 @@ function updateFilter() {
     filterApplicationsCount.textContent = NUM_APPLICATIONS;
     filterJobsCount.textContent = NUM_JOBS;
     if (filterOrphansCount) filterOrphansCount.textContent = NUM_ORPHANS;
-}
-
-
-function stopAllSessions() {
-    if(!confirm(`Are you sure you want to delete all running sessions?`)) return;
-
-    fetch('/api/delete_sessions', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            alert("All running sessions have been stopped");
-            fetchData();
-        }
-    })
-    .catch((error) => {
-        console.error('Error:', error);
-    });
 }

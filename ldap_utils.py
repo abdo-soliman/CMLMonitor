@@ -13,6 +13,7 @@ def is_ldap_enabled():
     Params:
     Returns: ldap_enabled -> bool, True if ldap.enabled is set to '1' in the configs table
     """
+
     with app.app_context():
         ldap_config = Config.query.filter_by(attr='ldap.enabled').first()
         return ldap_config and ldap_config.value.strip() == '1'
@@ -30,6 +31,7 @@ def validate_ldap_search(server_url: str, port: int, base_dn: str, bind_dn: str,
     Returns: ldap_test_successful -> bool, True if connection to LDAP server is successfully established
              message -> str, test connection result message
     """
+
     try:
         # 1. Connect and Bind to the LDAP Server
         server = Server(server_url, port=port, get_info=ALL)
@@ -61,7 +63,10 @@ def validate_ldap_search(server_url: str, port: int, base_dn: str, bind_dn: str,
 def search_ldap_user(username):
     """
     Searches LDAP/AD for a specific username.
-    Returns (user_data_dict, error_message).
+
+    Params: username -> str
+    Returns: user_data_dict -> dict, user_data dict = { 'username': sAMAccountName, '', 'mail': mail, 'fullname': displayName }
+             error_message -> str or None
     """
     with app.app_context():
         if not is_ldap_enabled():
@@ -118,45 +123,37 @@ def authenticate_and_user_data(username, password):
         server = Server(configs['LDAP_SERVER'], port=configs['LDAP_PORT'], get_info=ALL)
     
         try:
-            # Step 1: Bind with the service account to search for the user
             service_conn = Connection(server, user=configs['BIND_USER_DN'], password=configs['BIND_USER_PASSWORD'], auto_bind=True)
-    
-            # Search for the user
+
             attributes = ['sAMAccountName', 'mail', 'displayName']
             search_filter = f"(&(objectclass=person)(sAMAccountName={username}))"
-    
+
             service_conn.search(
                 search_base=configs['BASE_DN'],
                 search_filter=search_filter,
                 search_scope=SUBTREE,
                 attributes=attributes
             )
-    
+
             if not service_conn.entries:
-                return None # User not found
-    
-            # TODO Replace uid with sAMAccountName
+                return None
+
             entry = service_conn.entries[0]
             user_data = {
                 "uid": str(entry.sAMAccountName),
                 "mail": str(entry.mail),
                 "displayName": str(entry.displayName)
             }
-    
-            # Extract the user's full DN
+
             user_dn = entry.entry_dn
-    
-            # Step 2: Attempt to bind as the actual user to verify their password
             user_conn = Connection(server, user=user_dn, password=password, auto_bind=True)
-    
-            # Unbind both connections if successful
+
             user_conn.unbind()
             service_conn.unbind()
-    
+
             return user_data
-    
         except LDAPBindError:
-            return None # Invalid password
+            return None
         except LDAPException as e:
             print(f"LDAP Error: {e}")
             return None

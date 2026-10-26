@@ -10,8 +10,6 @@ class WorkloadType(str, Enum):
     APPLICATION = "application"
     JOB = "job"
     ORPHAN = "orphan"
-    # MODEL = "model"
-    # BATCH = "batch"
 
 
 class WorkloadStatus(str, Enum):
@@ -55,6 +53,7 @@ def validate_config_file(file_path):
     Params: file_path -> str
     Returns: 
     """
+
     if not os.path.isfile(file_path):
         raise FileNotFoundError(f"{file_path} does not exist or is not a file")
 
@@ -69,6 +68,7 @@ def is_none_or_empty(variable):
     Params: variable -> any
     Returns: True, if passed variable is None or empty string.
     """
+
     return variable is None or variable == ""
 
 
@@ -80,6 +80,7 @@ def split_age(age):
     Params: age -> str
     Returns: age_dict -> dict, {'d': days, 'h': hours, 'm': minutes, 's': seconds }
     """
+
     matches = re.findall(r"(\d+)([dhms])", age)
     # Convert to dictionary
     age_dict = {letter: int(number) for number, letter in matches}
@@ -111,6 +112,7 @@ def age_toseconds(age_dict):
     Params: age_dict -> dict, {'d': days, 'h': hours, 'm': minutes, 's': seconds }
     Returns: age_seconds -> int
     """
+
     # day to seconds 24*60*60=86400, hours to seconds 60*60=3600
     return (age_dict["d"] * 86400) + (age_dict["h"] * 3600) + (age_dict["m"] * 60) + age_dict["s"]
 
@@ -122,6 +124,7 @@ def seconds_to_age(seconds):
     Params: seconds -> int
     Returns: age_dict -> dict, {'d': days, 'h': hours, 'm': minutes, 's': seconds }
     """
+
     age_dict = { "d": 0, "h": 0, "m": 0, "s": 0 }
     
     age_dict["s"] = seconds % 60
@@ -137,6 +140,14 @@ def seconds_to_age(seconds):
 
 
 def age_dict_tostring(age_dict, round=2):
+    """
+    creates age string from age dict and rounds to it to a round value that is set to 2 by default
+
+    Params: age_dict -> dict, {'d': days, 'h': hours, 'm': minutes, 's': seconds }
+            round -> int, default value: 2
+    Returns: age_string -> str
+    """
+
     if round < 1 or round > 4:
         raise ValueError("you can only round age to 1, 2, 3, or 4")
 
@@ -167,14 +178,10 @@ def keep_only_arabic(string):
     if not isinstance(string, str):
         return None, False
 
-    # This pattern matches any character that is NOT in the Arabic Unicode range
-    # The '^' inside the brackets means "NOT"
-    non_arabic_pattern = r'[^\u0600-\u06FF\s]' 
-
-    # Check if the string contains at least one Arabic character
+    # Check if the string contains at least one Arabic character, Arabic unicode range is \u600-\u06FF
     has_arabic = re.search(r'[\u0600-\u06FF]', string)
     if has_arabic:
-        cleaned_string = re.sub(non_arabic_pattern, '', string) # We replace non-Arabic characters with an empty string ''
+        cleaned_string = re.sub(r'[^\u0600-\u06FF\s]', '', string) # We replace non-Arabic characters with an empty string '', the pattern negates the arabic unicode range by adding '^' as a prefix
         cleaned_string = " ".join(cleaned_string.split()) # Clean up extra whitespace
         return cleaned_string, has_arabic
 
@@ -212,7 +219,13 @@ def pagination_to_indecies(page_size, page_number, total_size):
 
 # Add this helper function at the top or inside cmlapi_manager.py
 def parse_quantity(quantity_str) -> float:
-    """Parses Kubernetes resource quantity strings into standard numerical base units."""
+    """
+    Parses Kubernetes resource quantity strings into standard numerical base units.
+
+    Params: quantity_str -> str
+    Returns: quantity_bytes -> float
+    """
+
     if isinstance(quantity_str, (int, float)):
         return float(quantity_str)
     
@@ -243,6 +256,14 @@ def parse_quantity(quantity_str) -> float:
 
 
 def sqlite_fix_timezone(date_time_obj, time_zone):
+    """
+    Shifts datetime to a timezone and remove tzinfo from it for compatibility with SQLite datetime format
+
+    Params: date_time_obj -> str|datetime
+            time_zone -> str
+    Returns: dt -> datetime
+    """
+
     if not date_time_obj:
         return datetime.now()
 

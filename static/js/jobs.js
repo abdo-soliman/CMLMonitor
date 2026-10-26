@@ -1,24 +1,274 @@
 let currentPage = 1;
 let currentSize = 25;
-let searchQuery = "";
 let syncPollInterval = null;
 
+// Initialize the generic Multi Search function
+const ADVANCED_SEARCH_CONFIG = [
+    { label: "Name", value: "name" },
+    { label: "Username", value: "username" },
+    { label: "Project", value: "project" },
+    { label: "Script", value: "script" },
+    { label: "Job Type", value: "job_type" },
+    { label: "Status", value: "status" }
+];
+
+let SEARCH_DATA = {};
+let advancedSearchObj = null;
+
 document.addEventListener('DOMContentLoaded', () => {
+    advancedSearchObj = initAdvancedSearch(
+        'advanced-search-search-container', 
+        'advanced-search-input', 
+        'advanced-search-dropdown', 
+        'advanced-search-param-hint', 
+        'advanced-search-chips', 
+        ADVANCED_SEARCH_CONFIG, 
+        () => SEARCH_DATA, 
+        (filters) => fetchJobs(1)
+    );
+
     fetchJobs(1);
     // Poll every 60 seconds
     setInterval(() => fetchJobs(currentPage), 60000);
 });
 
+
+function initAdvancedSearch(containerId, inputId, dropdownId, hintId, chipsId, config, getSearchDataCallback, onSearchCallback) {
+    const inputEl = document.getElementById(inputId);
+    const dropdownEl = document.getElementById(dropdownId);
+    const hintEl = document.getElementById(hintId);
+    const chipsContainer = document.getElementById(chipsId);
+    const containerEl = document.getElementById(containerId);
+
+    let activeFilters = [];
+    let isSelectingParam = true;
+    let currentSelectedParam = null;
+    let activeDropdownIndex = -1;
+
+    // Create a safe identifier for the dynamic window function (replace hyphens with underscores)
+    const safeContainerId = containerId.replace(/-/g, '_');
+
+    function renderChips() {
+        chipsContainer.innerHTML = '';
+        activeFilters.forEach((f, idx) => {
+            const chip = document.createElement('div');
+            chip.className = 'advanced-search-chip';
+            const conf = config.find(c => c.value === f.param);
+            const label = conf ? conf.label : f.param;
+            chip.innerHTML = `
+                <span class="cancel-btn me-2" onclick="window.removeAdvancedSearchFilter_${safeContainerId}(${idx})"><i class="fa-solid fa-circle-xmark"></i></span>
+                <span class="param-name">${escapeHtml(label)}:</span> 
+                <span class="param-value">${escapeHtml(f.value)}</span> 
+            `;
+            chipsContainer.appendChild(chip);
+        });
+    }
+
+    window[`removeAdvancedSearchFilter_${safeContainerId}`] = function(idx) {
+        activeFilters.splice(idx, 1);
+        renderChips();
+        resetInput();
+        onSearchCallback(activeFilters);
+        inputEl.focus();
+    };
+
+    function resetInput() {
+        isSelectingParam = true;
+        currentSelectedParam = null;
+        inputEl.value = '';
+        inputEl.placeholder = activeFilters.length === 0 ? 'Search...' : '';
+        hintEl.classList.add('d-none');
+        hintEl.innerText = '';
+        hideDropdown();
+    }
+
+    function getAvailableParams() {
+        const usedParams = activeFilters.map(f => f.param);
+        return config.filter(c => !usedParams.includes(c.value));
+    }
+
+    function showDropdown(items, isParamMode) {
+        dropdownEl.innerHTML = '';
+        activeDropdownIndex = -1;
+        if (!items || items.length === 0) {
+            hideDropdown();
+            return;
+        }
+        items.forEach((item, idx) => {
+            const div = document.createElement('div');
+            div.className = 'advanced-search-dropdown-item';
+            div.innerText = isParamMode ? item.label : String(item);
+            div.onmousedown = (e) => {
+                e.preventDefault(); 
+                if (isParamMode) selectParam(item);
+                else addFilter(item);
+            };
+            dropdownEl.appendChild(div);
+        });
+        dropdownEl.style.display = 'block';
+    }
+
+    function hideDropdown() {
+        // Clear HTML so hidden Ghost items don't intercept Enter key events
+        dropdownEl.innerHTML = ''; 
+        dropdownEl.style.display = 'none';
+        activeDropdownIndex = -1;
+    }
+
+    function selectParam(paramObj) {
+        isSelectingParam = false;
+        currentSelectedParam = paramObj;
+        inputEl.value = '';
+        inputEl.placeholder = '';
+        hintEl.innerText = paramObj.label + ':';
+        hintEl.classList.remove('d-none');
+        inputEl.focus();
+        showValues('');
+    }
+
+    function addFilter(value) {
+        if (!value || !String(value).trim()) return;
+        activeFilters.push({ param: currentSelectedParam.value, value: String(value).trim() });
+        renderChips();
+        resetInput();
+        onSearchCallback(activeFilters);
+
+        // Explicitly force focus and immediately show the params again
+        inputEl.focus();
+        showParams('');
+    }
+
+    function showParams(filterText = '') {
+        const available = getAvailableParams();
+        const filtered = available.filter(c => c.label.toLowerCase().includes(filterText.toLowerCase()));
+        showDropdown(filtered, true);
+    }
+
+    function showValues(filterText = '') {
+        const searchData = getSearchDataCallback();
+        let values = searchData[currentSelectedParam.value] || [];
+        if (filterText) {
+            values = values.filter(v => String(v).toLowerCase().includes(filterText.toLowerCase()));
+        }
+        showDropdown(values, false);
+    }
+
+    function updateDropdownSelection() {
+        const items = dropdownEl.querySelectorAll('.advanced-search-dropdown-item');
+        items.forEach((item, idx) => {
+            if (idx === activeDropdownIndex) item.classList.add('active');
+            else item.classList.remove('active');
+        });
+        if (activeDropdownIndex >= 0 && items[activeDropdownIndex]) {
+            items[activeDropdownIndex].scrollIntoView({ block: 'nearest' });
+        }
+    }
+
+    // Force focus to input if the user clicks anywhere in the empty space of the search bar
+    containerEl.addEventListener('click', (e) => {
+        if (e.target !== inputEl && e.target !== dropdownEl && !e.target.closest('.cancel-btn')) {
+            inputEl.focus();
+        }
+    });
+
+    inputEl.addEventListener('focus', () => {
+        if (isSelectingParam) showParams(inputEl.value);
+        else showValues(inputEl.value);
+    });
+
+    inputEl.addEventListener('blur', () => {
+        setTimeout(() => {
+            // Only hide the dropdown if focus actually left the search container
+            if (!containerEl.contains(document.activeElement)) {
+                hideDropdown();
+                if (!isSelectingParam && inputEl.value.trim() === '') {
+                    resetInput();
+                }
+            }
+        }, 150);
+    });
+
+    inputEl.addEventListener('input', (e) => {
+        const val = e.target.value;
+        if (isSelectingParam) showParams(val);
+        else showValues(val);
+    });
+
+    inputEl.addEventListener('keydown', (e) => {
+        const isDropdownVisible = dropdownEl.style.display === 'block';
+        const items = isDropdownVisible ? dropdownEl.querySelectorAll('.advanced-search-dropdown-item') : [];
+        
+        if (e.key === 'Backspace' && inputEl.value === '') {
+            if (!isSelectingParam) {
+                resetInput();
+                showParams('');
+            } else if (activeFilters.length > 0) {
+                activeFilters.pop();
+                renderChips();
+                onSearchCallback(activeFilters);
+                showParams('');
+            }
+        } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (activeDropdownIndex < items.length - 1) {
+                activeDropdownIndex++;
+                updateDropdownSelection();
+            }
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (activeDropdownIndex > 0) {
+                activeDropdownIndex--;
+                updateDropdownSelection();
+            }
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            
+            if (activeDropdownIndex >= 0 && activeDropdownIndex < items.length) {
+                items[activeDropdownIndex].onmousedown(new MouseEvent('mousedown'));
+            } else {
+                if (isSelectingParam && items.length > 0) {
+                    items[0].onmousedown(new MouseEvent('mousedown'));
+                } else if (!isSelectingParam) {
+                    if (inputEl.value.trim() !== '') {
+                        addFilter(inputEl.value);
+                    } else if (items.length > 0) {
+                        items[0].onmousedown(new MouseEvent('mousedown'));
+                    }
+                }
+            }
+        }
+    });
+
+    return {
+        getActiveFilters: () => activeFilters,
+        clearFilters: () => {
+            activeFilters = [];
+            renderChips();
+            resetInput();
+        }
+    };
+}
+
+
 async function fetchJobs(page = null) {
     if (page) currentPage = page;
     
-    const url = `/api/jobs?page=${currentPage}&size=${currentSize}&search=${encodeURIComponent(searchQuery)}`;
+    const searchFiltersPayload = advancedSearchObj ? JSON.stringify(advancedSearchObj.getActiveFilters()) : '[]';
+
+    const params = new URLSearchParams({
+        page: currentPage,
+        size: currentSize,
+        searchFilters: searchFiltersPayload
+    });
+    
+    const url = `/api/jobs?${params.toString()}`;
     
     try {
         const response = await fetch(url);
         const data = await response.json();
         
         if (data.jobs) {
+            SEARCH_DATA = data.search_data;
             renderTable(data.jobs);
             renderPagination(data.pagination);
         }
@@ -67,7 +317,7 @@ function renderTable(jobs) {
                 
                 // Extract properties to detect the dummy CML date (accounting for JS 2001 parsing quirk)
                 const year = dateObj.getFullYear();
-                const month = dateObj.getMonth(); // 0 is January
+                const month = dateObj.getMonth();
                 const date = dateObj.getDate();
                 
                 if ((year <= 1 || year === 2001) && month === 0 && date === 1) {
@@ -122,15 +372,6 @@ function renderPagination(p) {
     btnLast.querySelector('button').onclick = p.has_next ? () => fetchJobs(p.pages) : null;
 }
 
-let searchTimeout;
-function onSearchInput(val) {
-    searchQuery = val;
-    clearTimeout(searchTimeout);
-    searchTimeout = setTimeout(() => {
-        fetchJobs(1);
-    }, 400); // Debounce search
-}
-
 function changePageSize(size) {
     currentSize = parseInt(size);
     fetchJobs(1);
@@ -146,7 +387,6 @@ async function syncJobs() {
     const spinner = btn.querySelector('.spinner-border');
     const btnText = btn.querySelector('.btn-text');
 
-    // Disable button and show spinner
     btn.disabled = true;
     spinner.classList.remove('d-none');
     btnText.innerText = 'Refreshing...';
@@ -156,10 +396,8 @@ async function syncJobs() {
         const data = await response.json();
 
         if (response.ok && data.success) {
-            // Background thread successfully started. Begin polling the status.
             pollSyncStatus();
         } else {
-            // Handle 429 Too Many Requests or lock rejections
             showFlashMessage(data.message || 'Failed to start job refresh.', 'danger');
             resetSyncButton();
         }
@@ -172,12 +410,9 @@ async function syncJobs() {
 
 async function pollSyncStatus() {
     const startTime = Date.now();
-    
-    // Clear any existing intervals just in case
     if (syncPollInterval) clearInterval(syncPollInterval);
 
     syncPollInterval = setInterval(async () => {
-        // Hard timeout: Stop polling after 5 minutes
         if (Date.now() - startTime > 300000) {
             clearInterval(syncPollInterval);
             showFlashMessage('Sync request timed out after 5 minutes.', 'danger');
@@ -192,20 +427,17 @@ async function pollSyncStatus() {
             if (data.status === 'success') {
                 clearInterval(syncPollInterval);
                 showFlashMessage('Jobs refreshed successfully.', 'success');
-                fetchJobs(currentPage); // Reload table with fresh data
+                fetchJobs(currentPage); 
                 resetSyncButton();
             } else if (data.status === 'failed' || data.status === 'timeout') {
                 clearInterval(syncPollInterval);
                 showFlashMessage('Failed to refresh jobs on the server.', 'danger');
                 resetSyncButton();
             }
-            // If status is 'running' or 'idle', do nothing. It will poll again in 3 seconds.
-            
         } catch (err) {
             console.error("Polling error:", err);
-            // Don't stop polling on a single network blip, just wait for the next tick
         }
-    }, 3000); // Check status every 3 seconds
+    }, 3000); 
 }
 
 function resetSyncButton() {
@@ -228,16 +460,16 @@ function showFlashMessage(message, type = 'success') {
     if (!container) return;
 
     const alertDiv = document.createElement('div');
-    alertDiv.className = `alert alert-${type} alert-dismissible fade show shadow-sm`;
+    alertDiv.className = `alert alert-${type} alert-dismissible fade show shadow-sm text-center`;
     alertDiv.role = 'alert';
-    
+
     const icon = type === 'success' ? 'fa-circle-check' : 'fa-circle-exclamation';
-    
+
     alertDiv.innerHTML = `
         <i class="fa-solid ${icon} me-2"></i>${message}
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     `;
-    
+
     container.appendChild(alertDiv);
 
     setTimeout(() => {

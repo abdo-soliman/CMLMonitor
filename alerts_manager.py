@@ -5,15 +5,14 @@ import argparse
 import pandas as pd
 from pathlib import Path
 from pprint import pprint
-from datetime import datetime
-from jinja2 import Environment, FileSystemLoader
-from croniter import croniter, CroniterBadCronError
-
 from models import Config
 from extensions import app
+from datetime import datetime
 from smtp_utils import send_email
 from utils import split_age, age_toseconds
 from workload_manager import WorkloadManager
+from jinja2 import Environment, FileSystemLoader
+from croniter import croniter, CroniterBadCronError
 
 workload_manager = None
 OUTPUT = None
@@ -311,7 +310,6 @@ if __name__ == "__main__":
         custom_recipients = args.recipients.split(',') if args.recipients else None
 
         if args.dry_run:
-            # exit if smtp is disabled by admin
             if not alerts_manager.alerts_enabled:
                 exit()
 

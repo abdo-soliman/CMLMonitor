@@ -80,7 +80,6 @@
             </div>
         {% else %}
             <div id="utilization-section" class="mb-5">
-                <!-- Added justify-content-between here to push the toggle to the right -->
                 <div class="d-flex justify-content-between align-items-center mb-3">
                     <h2 class="mb-0">Cluster Utilization</h2>
                     {% if user.is_admin %}
@@ -91,7 +90,6 @@
                     {% endif %}
                 </div>
                 <div id="nodes-container" class="row justify-content-center g-3">
-                    <!-- Injected via stats.js -->
                     <div class="col-12 text-center py-4">
                         <div class="spinner-border text-primary" role="status"></div>
                     </div>
@@ -145,44 +143,17 @@
                     </button>
                 </div>
 
-                <div class="d-flex">
-                    <div class="d-flex align-items-center me-2">
-                        <label class="me-2 small fw-bold text-secondary text-nowrap">Filter by:</label>
-                        <select
-                            id="search-filter"
-                            class="form-select search-input"
-                            aria-label="Filter by category"
-                            onchange="setSearchFilter(this.value)"
-                            style="width: 200px; cursor: pointer;"
-                        >
-                            <option value="username">Username</option>
-                            <option value="project">Project</option>
-                            <option value="session_name">Session Name</option>
-                            <option value="namespace">Namespace</option>
-                            <option value="session_id">Session ID</option>
-                            <option value="status">Status</option>
-                            <option value="age">Age</option>
-                            <option value="resources">Resources</option>
-                        </select>
+                <!-- Advanced Multi Search SEARCH COMPONENT -->
+                <div class="d-flex flex-grow-1 ms-3">
+                    <div class="advanced-search-search-container w-100 position-relative" id="advanced-search-search-container">
+                        <i class="fa-solid fa-magnifying-glass text-muted me-2 ms-2"></i>
+                        <div id="advanced-search-chips" class="d-flex flex-wrap align-items-center"></div>
+                        <div class="advanced-search-input-wrapper">
+                            <span id="advanced-search-param-hint" class="advanced-search-input-param-hint d-none"></span>
+                            <input type="text" id="advanced-search-input" class="advanced-search-input" placeholder="Search..." autocomplete="off">
+                        </div>
+                        <div id="advanced-search-dropdown" class="advanced-search-dropdown shadow-sm"></div>
                     </div>
-
-                    <input
-                        id="search-value-input"
-                        type="search"
-                        list="search-data"
-                        aria-label="Search" 
-                        placeholder="Search"
-                        style="width: 250px;"
-                        onkeydown="searchOnEnter(event)"
-                        onfocus="searchInputFocus()"
-                        class="form-control search-input"
-                        >
-
-                    <datalist id="search-data">
-                        {% for username in usernames %}
-                            <option value="{{ username }}">
-                        {% endfor %}
-                    </datalist>
                 </div>
             </div>
 
@@ -199,36 +170,24 @@
                     <nav aria-label="Table pagination" class="me-3">
                         <ul id="paginationLinks" class="pagination pagination-sm mb-0">
                             <li id="first-page-button" class="page-item disabled">
-                                <button class="page-link" onclick="fetchData('first')">
-                                    <i class="fa-solid fa-backward-step"></i>
-                                </button>
+                                <button class="page-link" onclick="fetchData('first')"><i class="fa-solid fa-backward-step"></i></button>
                             </li>
                             <li id="previous-page-button" class="page-item disabled">
-                                <button class="page-link" onclick="fetchData('previous')">
-                                    <i class="fa-solid fa-angle-left"></i>
-                                </button>
+                                <button class="page-link" onclick="fetchData('previous')"><i class="fa-solid fa-angle-left"></i></button>
                             </li>
                             {% if total_number_of_workload > 25 %}
                                 <li id="next-page-button" class="page-item">
-                                    <button class="page-link" onclick="fetchData('next')">
-                                        <i class="fa-solid fa-angle-right"></i>
-                                    </button>
+                                    <button class="page-link" onclick="fetchData('next')"><i class="fa-solid fa-angle-right"></i></button>
                                 </li>
                                 <li id="last-page-button" class="page-item">
-                                    <button class="page-link" onclick="fetchData('last')">
-                                        <i class="fa-solid fa-forward-step"></i>
-                                    </button>
+                                    <button class="page-link" onclick="fetchData('last')"><i class="fa-solid fa-forward-step"></i></button>
                                 </li>
                             {% else %}
                                 <li id="next-page-button" class="page-item disabled">
-                                    <button class="page-link" onclick="fetchData('next')">
-                                        <i class="fa-solid fa-angle-right"></i>
-                                    </button>
+                                    <button class="page-link" onclick="fetchData('next')"><i class="fa-solid fa-angle-right"></i></button>
                                 </li>
                                 <li id="last-page-button" class="page-item disabled">
-                                    <button class="page-link" onclick="fetchData('last')">
-                                        <i class="fa-solid fa-forward-step"></i>
-                                    </button>
+                                    <button class="page-link" onclick="fetchData('last')"><i class="fa-solid fa-forward-step"></i></button>
                                 </li>
                             {% endif %}
                         </ul>
@@ -279,9 +238,7 @@
                                         <span class="d-inline-block me-1" style="width: 20px;"></span> 
                                     {% endif %}
                                 </td>
-                                <td>
-                                    <strong>{{ workload.workload_type }}</strong>
-                                </td>
+                                <td><strong>{{ workload.workload_type }}</strong></td>
                                 <td>
                                     <strong>{{ workload.user }}</strong>
                                     {% if workload.show_full_name %}<br><span style="color:#666666;">{{ workload.full_name }}</span>{% endif %}
@@ -311,7 +268,6 @@
                                     <span class="badge-id text-muted small">{{ workload.id }}</span>
                                 </td>
                                 <td>
-                                    <!-- IMPROVED STATUS & REASON -->
                                     <div class="d-flex align-items-center flex-wrap">
                                         <span class="badge badge-schedule badge-schedule-{{ workload.status|lower }}">{{ workload.status }}</span>
                                         {% if workload.reason %}
@@ -362,7 +318,6 @@
                                         </div>
                                     </td>
                                     <td>
-                                        <!-- IMPROVED SUB-NAMESPACE LINK -->
                                         <div class="ps-2">
                                             <a href="{{ sub.namespace_url }}" target="_blank" class="text-primary fw-semibold text-decoration-none" title="View in Kubernetes">
                                                 {{ sub.namespace }} <i class="fa-solid fa-arrow-up-right-from-square small ms-1"></i>
@@ -371,7 +326,6 @@
                                         </div>
                                     </td>
                                     <td>
-                                        <!-- IMPROVED SUB-STATUS & REASON -->
                                         <div class="d-flex align-items-center flex-wrap">
                                             <span class="badge badge-schedule badge-schedule-{{ sub.status|lower }}">{{ sub.status }}</span>
                                             {% if sub.reason %}
@@ -426,19 +380,6 @@
             ORPHAN: "orphan"
         });
 
-        const SearchFilters = Object.freeze({
-            ALL: "all",
-            USERNAME: "username",
-            USER_FULLNAME: "user_fullname",
-            PROJECT: "project",
-            SESSION_NAME: "session_name",
-            NAMESPACE: "namespace",
-            SESSION_ID: "session_id",
-            STATUS: "status",
-            AGE: "age",
-            RESOURCES: "resources"
-        });
-
         const OrderByFilters = Object.freeze({
             ALL: "all",
             AGE: "age",
@@ -456,9 +397,7 @@
         let NUM_JOBS = {{ num_jobs | default(0) }};
         let NUM_ORPHANS = {{ num_orphans | default(0) }};
         let TOTAL_WORKLOAD = {{ total_number_of_workload | default(0) }};
-        let SEARCH_FILTER = SearchFilters.ALL;
-        let SEARCH_FILTER_CHANGED = false;
-        let SEARCH_VALUE = "";
+        
         let ORDER_BY_FILTER = OrderByFilters.ALL;
         let ORDER_BY_DESC = false;
         let SEARCH_DATA = JSON.parse({{ search_data | default('[]') | tojson }});

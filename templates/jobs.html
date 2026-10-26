@@ -74,8 +74,18 @@
         </div>
 
         <div class="actions-container d-flex justify-content-between mb-3 bg-white p-3 rounded border shadow-sm">
-            <div class="d-flex align-items-center">
-                <input id="searchInput" type="search" class="form-control search-input" placeholder="Search by Job Name or Script..." style="width: 300px;" oninput="onSearchInput(this.value)">
+            
+            <!-- ADVANCED SEARCH COMPONENT -->
+            <div class="d-flex flex-grow-1 me-3">
+                <div class="advanced-search-search-container w-100 position-relative" id="advanced-search-search-container">
+                    <i class="fa-solid fa-magnifying-glass text-muted me-2 ms-2"></i>
+                    <div id="advanced-search-chips" class="d-flex flex-wrap align-items-center"></div>
+                    <div class="advanced-search-input-wrapper">
+                        <span id="advanced-search-param-hint" class="advanced-search-input-param-hint d-none"></span>
+                        <input type="text" id="advanced-search-input" class="advanced-search-input" placeholder="Search..." autocomplete="off">
+                    </div>
+                    <div id="advanced-search-dropdown" class="advanced-search-dropdown shadow-sm"></div>
+                </div>
             </div>
 
             <div class="pagination-container d-flex justify-content-end align-items-center">

@@ -23,7 +23,6 @@ document.addEventListener("DOMContentLoaded", function() {
                 input.required = isEnabled;
             });
 
-            // 2. Toggle the test button disabled state
             if (smtpTestBtn) {
                 smtpTestBtn.disabled = !isEnabled;
             }
@@ -62,7 +61,6 @@ document.addEventListener("DOMContentLoaded", function() {
                 input.disabled = !isEnabled;
             });
 
-            // 4. Toggle the test button disabled state
             if (ldapTestBtn) {
                 ldapTestBtn.disabled = !isEnabled;
             }
@@ -182,15 +180,12 @@ function testSMTPConfig() {
     const btn = document.getElementById('btn-test-smtp');
     const alertBoxId = 'smtp-test-alert';
 
-    // 1. Get raw values from the alert and report recipient inputs
     const alertEmailsRaw = document.querySelector('input[name="alert_recipient_emails"]').value;
     const reportEmailsRaw = document.querySelector('input[name="report_recipient_emails"]').value;
 
-    // 2. Split by comma, trim whitespace, and filter out empty strings
     const alertEmails = alertEmailsRaw.split(',').map(e => e.trim()).filter(e => e);
     const reportEmails = reportEmailsRaw.split(',').map(e => e.trim()).filter(e => e);
 
-    // 3. Combine and Deduplicate using a Set
     const uniqueEmails = [...new Set([...alertEmails, ...reportEmails])];
 
     if (uniqueEmails.length === 0) {

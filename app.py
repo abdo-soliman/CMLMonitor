@@ -13,6 +13,7 @@ import threading
 import subprocess
 import pandas as pd
 from sqlalchemy import event
+from datetime import datetime
 from flask_migrate import Migrate
 from pydantic import ValidationError
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -30,6 +31,14 @@ from schemas import AdminSchema, SetupSchema, LDAPSchema, CMLSchema, AlertsSchem
 from ldap_utils import is_ldap_enabled, authenticate_and_user_data, validate_ldap_search, search_ldap_user
 from utils import WorkloadType, SearchFilters, OrderByFilters, pagination_to_indecies, is_none_or_empty, keep_only_arabic
 
+
+logging.basicConfig(
+    filename="/home/cdsw/app.log",
+    filemode="a",
+    level=logging.INFO,
+    format="[%(levelname)s] %(asctime)s [%(process)d:%(threadName)s] - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
 
 app.secret_key = 'super_secret_key'  # Change this in production
 
@@ -84,7 +93,6 @@ def jobs_light_sync_daemon(app_context):
             time.sleep(120)  # 2 minutes
 
 
-# --- Background Daemon for Stats Polling ---
 def node_stats_daemon(app_context):
     """Background loop polling node utilization every 3 seconds."""
     with app_context:
@@ -101,11 +109,9 @@ def init_workload_manager():
     """Helper function to instantiate and start the global workload manager."""
     global workload_manager
     if workload_manager is None:
-        # Import here if needed to avoid circular imports, or assume it's imported at the top
         workload_manager = WorkloadManager()
         print("Workload Manager initialized and caching started.")
 
-        # Start the daily runtime sync thread
         app_context = app.app_context()
         t = threading.Thread(target=runtime_sync_daemon, args=(app_context,), daemon=True)
         t.start()
@@ -127,6 +133,7 @@ def is_cml_configed():
     Params:
     Returns: cml_configured -> boolean, True if all CML configurations are not none or empty strings
     """
+
     with app.app_context():
         cml_configs = Config.query.filter(Config.attr.like('cml.%')).all()
         configs = {config.attr: config.value for config in cml_configs}
@@ -138,11 +145,9 @@ def is_cml_configed():
 with app.app_context():
     try:
         init_config = Config.query.filter_by(attr='init').first()
-        # 2. If setup is already complete, start the manager immediately
         if init_config and init_config.value == '1':
             init_workload_manager()
     except Exception as e:
-        # The database might not be created/migrated yet
         print(f"Skipping WorkloadManager initialization: {e}")
 
     try:
@@ -195,7 +200,6 @@ def sync_alert_processes(app):
 # trigger alert process sync on config table changes
 @event.listens_for(Config, 'after_update')
 def receive_config_update(mapper, connection, target):
-    # We only care if one of these specific attributes was updated
     relevant_attrs = [
         'alert.enabled', 
         'alert.runtime.alert_cron', 
@@ -234,11 +238,11 @@ def enforce_access_policies():
     allowed_admin_setup = ['setup_admin_page', 'create_admin', 'static']
     
     try:
-        # 1. DAY 0 CHECK: If no users and no configs exist, force Admin Creation
+        # DAY 0 CHECK: If no users and no configs exist, force Admin Creation
         if User.query.first() is None and Config.query.first() is None:
             if request.endpoint not in allowed_admin_setup:
                 return redirect(url_for('setup_admin_page'))
-            return # Allow them to proceed to the admin creation page
+            return 
     except Exception:
         # Silently pass if the database tables aren't fully initialized yet 
         pass
@@ -254,7 +258,7 @@ def enforce_access_policies():
                 logout_user()
                 return redirect(url_for('login'))
 
-        # 2. CONFIGURATION PHASE CHECK
+        # CONFIGURATION PHASE CHECK
         allowed_endpoints = ['setup_wizard', 'test_setup_cml_connection', 'test_ldap_connection', 'test_smtp_connection', 'save_setup', 'login', 'logout', 'static']
 
         if request.endpoint not in allowed_endpoints:
@@ -288,7 +292,6 @@ def create_admin():
 
     raw_data = request.json or {}
 
-    # 1. Validate data using Pydantic
     try:
         valid_data = AdminSchema(**raw_data)
     except ValidationError as e:
@@ -300,32 +303,28 @@ def create_admin():
         }), 400
 
     try:
-        # 2. Create the Admin User
-        # Map the validated Pydantic fields to your database model's fields
         hashed_pw = generate_password_hash(valid_data.password)
         new_user = User(
             username=valid_data.username,
             password=hashed_pw,
-            fullname=valid_data.full_name,  # Maps to 'fullname' in DB
-            mail=valid_data.email,          # Maps to 'mail' in DB
+            fullname=valid_data.full_name,  
+            mail=valid_data.email,          
             is_admin=True,
             config_admin=True,
             is_external=False
         )
         db.session.add(new_user)
-        db.session.commit() # Must commit here so init_configs can find the user
+        db.session.commit() 
 
-        # 3. Run your init_configs function
         init_configs(valid_data.username)
 
-        # 4. Validation: Check if configs actually seeded
         if Config.query.first() is None:
             raise Exception("Configurations failed to initialize. Please check the backend logs.")
 
         return jsonify({"success": True, "message": "Admin user and configurations initialized."})
 
     except Exception as e:
-        # 5. ROLLBACK: If anything fails, wipe the tables to restore the 'Day 0' state
+        # ROLLBACK: If anything fails, wipe the tables to restore the 'Day 0' state
         db.session.rollback()
         try:
             db.session.query(Config).delete()
@@ -343,58 +342,44 @@ def login():
         username = request.form.get('username')
         password = request.form.get('password')
 
-        # 1. Check if the user exists in the local database
-        user = db.session.execute(db.select(User).filter_by(username=username)).scalar()
+        try:
+            user = db.session.execute(db.select(User).filter_by(username=username)).scalar()
 
-        if user:
-
-            # 2. User exists: Check if they are internal or external
-            if not user.is_external:
-                # LOCAL AUTHENTICATION
+            if (user is None or user.is_external) and not is_ldap_enabled():
+                return render_template('login.html', error="Invalid credentials")
+            if user and user.is_external:
+                if authenticate_and_user_data(username, password):
+                    login_user(user)
+                    return redirect(url_for('home'))
+            elif user:
                 if user.password and check_password_hash(user.password, password):
                     login_user(user)
                     return redirect(url_for('home'))
-                else:
-                    return render_template('login.html', error="Invalid credentials")
             else:
-                if is_ldap_enabled():
-                    # EXTERNAL (LDAP) AUTHENTICATION for existing DB user
-                    user_data = authenticate_and_user_data(username, password)
-                    if user_data:
-                        login_user(user)
-                        return redirect(url_for('home'))
-                    else:
-                        return render_template('login.html', error="Invalid credentials")
-                else:
-                    return render_template('login.html', error="Invalid credentials")
-        else:
-            # 3. User does NOT exist in DB: Attempt LDAP Authentication
-            user_data = authenticate_and_user_data(username, password)
-            fullname, _ = keep_only_arabic(user_data.get('displayName'))
+                user_data = authenticate_and_user_data(username, password)
+                if user_data:
+                    fullname, _ = keep_only_arabic(user_data.get('displayName', None))
+                    new_user = User(
+                        username=username,
+                        password=None,               
+                        mail=user_data.get('mail'),
+                        fullname=fullname,
+                        is_external=True,            
+                        is_admin=False,              
+                        config_admin=False
+                    )
+                    db.session.add(new_user)
+                    db.session.commit()
 
-            if user_data is not None:
-                # LDAP Success! Auto-provision the user in the SQLite database
-                new_user = User(
-                    username=username,
-                    password=None,               # Set to NULL
-                    mail=user_data.get('mail'),
-                    fullname=fullname,
-                    is_external=True,            # Mark as LDAP user
-                    is_admin=False,              # Always false by default
-                    config_admin=False
-                )
+                    login_user(new_user)
+                    return redirect(url_for('home'))
 
-                db.session.add(new_user)
-                db.session.commit()
+            return render_template('login.html', error="Invalid credentials")
+        except Exception as e:
+            db.session.rollback()
+            logging.error(f"Login error for user {username}: {e}")
+            return render_template('login.html', error="Invalid credentials")
 
-                # Log the newly created user in
-                login_user(new_user)
-                return redirect(url_for('home'))
-            else:
-                # LDAP Failed and User not in DB
-                return render_template('login.html', error="Invalid credentials")
-
-    # Simple HTML form for GET request
     return render_template('login.html')
 
 
@@ -408,12 +393,10 @@ def logout():
 @app.route('/setup', methods=['GET'])
 @login_required
 def setup_wizard():
-    # 1. Security Check: Must be config_admin
     if not current_user.config_admin:
         flash("You do not have permission to perform initial setup.", "error")
         return redirect(url_for('home'))
 
-    # 2. State Check: Only allow if init == '0'
     init_config = Config.query.filter_by(attr='init').first()
     if init_config and init_config.value == '1':
         return redirect(url_for('home'))
@@ -429,8 +412,6 @@ def test_setup_cml_connection():
         return jsonify({"success": False, "message": "Unauthorized"}), 403
 
     data = request.json
-
-    # Use the keys that match the JS setupData payload
     domain = data.get('cml_workspace_domain')
     api_key = data.get('cml_api_key')
     kube_content = data.get('cml_kubeconfig_content')
@@ -477,8 +458,6 @@ def test_config_cml_connection():
         return jsonify({"success": False, "message": "Unauthorized"}), 403
 
     data = request.json
-
-    # Use the keys that match the JS setupData payload
     domain = data.get('cml_workspace_domain')
     api_key = data.get('cml_api_key')
     kube_content = data.get('cml_kubeconfig_content')
@@ -536,13 +515,11 @@ def test_ldap_connection():
         db_password_config = Config.query.filter_by(attr='ldap.bind_password').first()
         db_has_password = db_password_config and bool(db_password_config.value.strip())
         if not bind_password and not db_has_password:
-            # DB has no password, and user didn't provide one
             return jsonify({"success": False, "message": "Bind User Password is required because no password is currently saved."})        
     
         if not bind_password:
             bind_password = db_password_config.value.strip()
     
-        # Basic validation
         if not all([server_url, base_dn, bind_dn, bind_password, test_user]):
             return jsonify({"success": False, "message": "All fields, including Test Username, are required to verify the connection."})
     
@@ -574,7 +551,6 @@ def test_smtp_connection():
     db_has_password = db_password_config and bool(db_password_config.value.strip())
 
     if not password and not db_has_password:
-        # DB has no password, and user didn't provide one
         return jsonify({"success": False, "message": "SMTP User Password is required because no password is currently saved."})        
 
     if not password:
@@ -654,11 +630,9 @@ def save_setup():
 
     raw_data = request.json or {}
 
-    # 1. Validate data using Pydantic
     try:
         validated_data = SetupSchema(**raw_data)
     except ValidationError as e:
-        # Extract the first error message for a cleaner frontend alert
         error_msg = e.errors()[0]['msg']
         error_field = e.errors()[0]['loc'][0]
         return jsonify({
@@ -705,7 +679,6 @@ def save_setup():
         init_config.value = '1'
         init_config.updated_by = current_user.username
 
-    # Commit to the database
     try:
         db.session.commit()
         init_workload_manager()
@@ -722,11 +695,8 @@ def home():
         return redirect(url_for('login'))
 
     workloads, counts, _ = workload_manager.get(current_user)
-
     start_index, end_index, _, _, max_number_of_pages = pagination_to_indecies(25, 1, len(workloads))
-    search_data = workload_manager.get_search_data()
-    search_data_json = json.dumps(search_data, default=list)
-
+    search_data_json = json.dumps(workload_manager.get_search_data(), default=list)
     user = {
         "username": current_user.username,
         "fullname": current_user.fullname,
@@ -734,13 +704,12 @@ def home():
         "is_admin": current_user.is_admin,
         "config_admin": current_user.config_admin
     }
-    # Render the initial page with current data
+
     return render_template('home.html', \
                         user=user, \
                         cml_configured=is_cml_configed(), \
                         workloads=workloads[start_index:end_index], \
                         search_data=search_data_json, \
-                        usernames=search_data.get(SearchFilters.USERNAME.value, []), \
                         num_sessions=counts[WorkloadType.SESSION.value], \
                         num_applications=counts[WorkloadType.APPLICATION.value], \
                         num_jobs=counts[WorkloadType.JOB.value], \
@@ -764,7 +733,6 @@ def runtimes():
     hide_disabled = request.args.get('hide_disabled', 'true').lower() == 'true'
     sort_status = request.args.get('sort_status', 'none').lower()
 
-    # Check if the request is an AJAX call expecting JSON
     is_api = request.args.get('api', 'false').lower() == 'true'
 
     query = Runtime.query
@@ -781,7 +749,6 @@ def runtimes():
 
     runtimes_pagination = query.paginate(page=page, per_page=per_page, error_out=False)
 
-    # If requested by our JS fetch() function, return JSON
     if is_api:
         items = []
         for r in runtimes_pagination.items:
@@ -834,7 +801,6 @@ def config():
 
     all_configs = Config.query.all()
 
-    # Map the 'attr' column to the 'value' column using dictionary comprehension
     configs = {config.attr: config.value for config in all_configs}
     configs.pop('ldap.bind_password', None)
     configs.pop('alert.smtp.password', None)
@@ -849,7 +815,6 @@ def config():
     # Grab the active tab from the URL, default to 'ldap'
     active_tab = request.args.get('active_tab', 'ldap')
 
-    # Render the initial page with current data
     return render_template('config.html', \
                         user=user,
                         configs=configs,
@@ -896,11 +861,9 @@ def update_ldap():
     db_has_password = db_password_config and bool(db_password_config.value.strip())
 
     if not new_password and not db_has_password:
-        # DB has no password, and user didn't provide one
         flash("Bind User Password is required because no password is currently saved.", "error")
         return redirect(url_for('config', active_tab="ldap"))
 
-    # If a new password was provided, add it to our update dictionary
     if new_password:
         valid_ldap_configs['ldap.bind_password'] = new_password
 
@@ -911,7 +874,6 @@ def update_ldap():
             config_item.value = new_value
             config_item.updated_by = current_user.username
         else:
-            # Fallback in case the config attribute was accidentally deleted from the DB
             new_config = Config(attr=attr, value=new_value, updated_by=current_user.username)
             db.session.add(new_config)
 
@@ -941,11 +903,9 @@ def update_cml():
         'ecs_webui_base_url': request.form.get('ecs_webui_base_url', '')
     }
 
-    # Intercept the uploaded file (if provided)
     kube_file = request.files.get('kubeconfig_file')
     if kube_file and kube_file.filename:
         try:
-            # Decode bytes to text so Pydantic and Python can process it cleanly
             raw_data['kubeconfig_content'] = kube_file.read().decode('utf-8')
         except UnicodeDecodeError:
             flash("Invalid file encoding. Please upload a valid YAML text file.", "error")
@@ -967,7 +927,6 @@ def update_cml():
         'cml.ecs_webui_base_url': valid_data.ecs_webui_base_url
     }
 
-    # Update standard CML configs
     for attr, new_value in valid_cml_configs.items():
         config_item = Config.query.filter_by(attr=attr).first()
 
@@ -1064,11 +1023,9 @@ def update_alerts():
     db_has_password = db_password_config and bool(db_password_config.value.strip())
 
     if not new_password and not db_has_password:
-        # DB has no password, and user didn't provide one
         flash("SMTP User Password is required because no password is currently saved.", "error")
         return redirect(url_for('config', active_tab="alerts"))
 
-    # If a new password was provided, add it to our update dictionary
     if new_password:
         valid_alert_configs['alert.smtp.password'] = new_password
 
@@ -1158,7 +1115,7 @@ def api_toggle_user_role():
 
     if target_user.id == current_user.id:
         return jsonify({"success": False, "message": "You cannot toggle your own privileges."}), 400
-    # Explicitly route the assignment to bypass dynamic reflection issues
+        
     if role_type == 'is_admin':
         target_user.is_admin = new_value
     elif role_type == 'config_admin':
@@ -1184,7 +1141,6 @@ def api_add_user():
     user_type = data.get('user_type', 'local')
     username = data.get('username', '').strip()
     
-    # Strictly extract as separate booleans
     req_is_admin = bool(data.get('is_admin') is True)
     req_config_admin = bool(data.get('config_admin') is True)
 
@@ -1306,11 +1262,11 @@ def api_delete_user():
     if not target_user:
         return jsonify({"success": False, "message": "User not found."}), 404
 
-    # Rule 1: Cannot delete self
+    # Cannot delete self
     if target_user.id == current_user.id:
         return jsonify({"success": False, "message": "You cannot remove your own account."}), 400
 
-    # Rule 2: Cannot delete the last config_admin
+    # Cannot delete the last config_admin
     if target_user.config_admin:
         admin_count = User.query.filter_by(config_admin=True).count()
         if admin_count <= 1:
@@ -1365,18 +1321,23 @@ def api_refresh_status():
 
 @app.route('/api/data')
 def get_data():
-    """Returns the current data as JSON. 
-    We randomly update a value here to simulate live changes."""
+    """Returns the workload data as JSON."""
     if not current_user or current_user.is_anonymous:
         return jsonify({"error": "Unauthorized"}), 401
 
     page_size = request.args.get('pageSize', default=25, type=int)
     page_number = request.args.get('pageNumber', default=1, type=int)
     filter = request.args.get('filter', default="all", type=str)
-    search_filter = request.args.get('searchFilter', default="all", type=str)
-    search_value = request.args.get('searchValue', default=None, type=str)
+
+    search_filters_json = request.args.get('searchFilters', '[]')
+    try:
+        search_filters = json.loads(search_filters_json)
+    except:
+        search_filters = []
+
     order_by_filter = request.args.get('orderBy', default="all", type=str)
 
+    # cast desc to boolean
     raw_desc = request.args.get('desc', default='true').lower()
     if raw_desc not in ['true', 'false', '1', '0']:
         return jsonify({"error": "desc must be a boolean"}), 400
@@ -1384,10 +1345,9 @@ def get_data():
 
     try:
         new_filter = WorkloadType(filter)
-        new_search_filter = SearchFilters(search_filter)
         new_order_by_filter = OrderByFilters(order_by_filter)
 
-        workloads, counts, filters = workload_manager.get(current_user, new_filter, new_search_filter, search_value, order_by=new_order_by_filter, desc=order_by_desc)
+        workloads, counts, filters = workload_manager.get(current_user, new_filter, search_filters, order_by=new_order_by_filter, desc=order_by_desc)
 
         start_index, end_index, page_number, page_size, max_number_of_pages = pagination_to_indecies(page_size, page_number, len(workloads))
         search_data_json = json.dumps(workload_manager.get_search_data(), default=list)
@@ -1397,8 +1357,6 @@ def get_data():
             "page_size": page_size,
             "max_pages": max_number_of_pages,
             "filter": filters["filter"],
-            "search_filter": filters["search_filter"],
-            "search_value": filters["search_value"],
             "search_data": search_data_json,
             "order_by_filter": filters["order_by_filter"],
             "desc": filters["desc"],
@@ -1423,11 +1381,9 @@ def download_excel():
 
         df = pd.DataFrame(workloads)
         
-        # Safely drop columns if they exist
         df.drop(columns=['show_full_name', 'age_seconds'], errors='ignore', inplace=True)
 
-        # CRITICAL FIX: Excel does not support timezone-aware datetimes.
-        # We must localize them to None (naive) before exporting.
+        # localizing tz to None because Excel does not support timezone-aware datetimes.
         for col in df.select_dtypes(['datetimetz']).columns:
             df[col] = df[col].dt.tz_localize(None)
 
@@ -1478,21 +1434,19 @@ def jobs_page():
 def api_jobs():
     page_size = request.args.get('size', default=25, type=int)
     page_number = request.args.get('page', default=1, type=int)
-    search_value = request.args.get('search', default="", type=str).strip().lower()
 
-    jobs_data = workload_manager.get_jobs(current_user) if workload_manager else []
+    search_filters_json = request.args.get('searchFilters', '[]')
+    try:
+        search_filters = json.loads(search_filters_json)
+    except:
+        search_filters = []
 
-    # Search filter by Name or Script
-    if search_value:
-        jobs_data = [j for j in jobs_data if search_value in j["name"].lower() or search_value in j["script"].lower()]
-
-    # Sort descending by latest runs for relevance
-    jobs_data = sorted(jobs_data, key=lambda x: str(x.get("last_run_starting_time") or ""), reverse=True)
-
+    jobs_data, jobs_search_data = workload_manager.get_jobs(current_user, search_filters) if workload_manager else []
     start_index, end_index, page_number, page_size, max_number_of_pages = pagination_to_indecies(page_size, page_number, len(jobs_data))
 
     return jsonify({
         "jobs": jobs_data[start_index:end_index],
+        "search_data": jobs_search_data,
         "pagination": {
             "page": page_number,
             "pages": max_number_of_pages,
@@ -1503,6 +1457,7 @@ def api_jobs():
             "total": len(jobs_data)
         }
     })
+
 
 @app.route('/api/jobs/sync', methods=['POST'])
 @login_required
@@ -1531,7 +1486,7 @@ def api_sync_jobs():
 @app.route('/api/jobs/sync/status', methods=['GET'])
 @login_required
 def api_sync_jobs_status():
-    """Endpoint for the UI to poll the progress of the background thread."""
+    """Endpoint for the UI to poll the progress of the jobs sync background thread."""
     if not current_user.is_admin:
         return jsonify({"error": "Unauthorized"}), 403
 
@@ -1547,6 +1502,70 @@ def api_node_utilization():
     return jsonify({"nodes": data})
 
 
+# --- Application Logs Routes ---
+@app.route('/logs')
+@login_required
+def logs_page():
+    if not current_user.config_admin:
+        return redirect(url_for('home'))
+
+    user_data = {
+        "username": current_user.username,
+        "fullname": current_user.fullname,
+        "mail": current_user.mail,
+        "is_admin": current_user.is_admin,
+        "config_admin": current_user.config_admin
+    }
+    return render_template('logs.html', user=user_data, app_version=APP_VERSION)
+
+
+@app.route('/api/logs/stream')
+@login_required
+def api_logs_stream():
+    """Reads the log file from a specific byte offset to prevent sending the whole file."""
+    if not current_user.config_admin:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    offset = request.args.get('offset', default=0, type=int)
+    log_file = "/home/cdsw/app.log"
+
+    if not os.path.exists(log_file):
+        return jsonify({"logs": "Log file not found or has not been generated yet.\n", "offset": 0})
+
+    try:
+        with open(log_file, "r", encoding="utf-8") as f:
+            f.seek(0, os.SEEK_END)
+            file_size = f.tell()
+
+            if offset > file_size or offset == 0:
+                offset = max(0, file_size - 50000)
+
+            f.seek(offset)
+            new_logs = f.read()
+            new_offset = f.tell()
+
+        return jsonify({"logs": new_logs, "offset": new_offset})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/logs/download')
+@login_required
+def api_logs_download():
+    if not current_user.config_admin:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    log_file = "/home/cdsw/app.log"
+    if not os.path.exists(log_file):
+        return jsonify({"error": "Log file not found."}), 404
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    return send_file(
+        log_file,
+        as_attachment=True,
+        download_name=f"cmlmonitor_{timestamp}.log",
+        mimetype="text/plain"
+    )
+
 if __name__ == '__main__':
     app.run(host="127.0.0.1", port=int(os.environ["CDSW_APP_PORT"]))
-    # app.run(host="0.0.0.0", port=10000, debug=True)

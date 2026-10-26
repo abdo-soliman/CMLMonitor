@@ -38,7 +38,6 @@ class WorkloadManager():
             return
 
         self.cmlapi_manager = CMLAPIManager()
-        # Initialize Valkey (Redis) Connection
         valkey_host = os.getenv("VALKEY_HOST", "localhost")
         valkey_port = int(os.getenv("VALKEY_PORT", 6379))
         self.valkey = redis.Redis(host=valkey_host, port=valkey_port, db=0, decode_responses=True)
@@ -69,8 +68,7 @@ class WorkloadManager():
         finally:
             self.valkey.delete("cml_workload_sync_lock")
 
-    def get(self, user, filter=None, search_filter=None, search_value=None, order_by=None, desc=None):
-        # Read the single source of truth from Valkey
+    def get(self, user, filter=None, search_filters=None, order_by=None, desc=None):
         cached_data = self.valkey.get("cml_workloads")
         workloads = json.loads(cached_data, object_hook=datetime_decoder) if cached_data else []
 
@@ -78,33 +76,31 @@ class WorkloadManager():
         if not user.is_admin:
             workloads = [workload for workload in workloads if workload["user"] == user.username]
 
-        to_be_search_filter = SearchFilters.ALL
-        if search_filter is not None and search_filter.value in SearchFilters._value2member_map_:
-            to_be_search_filter = search_filter
-
-        to_be_search_value = ""
-        if search_value is not None:
-            to_be_search_value = search_value.lower()
-
-        if to_be_search_filter != WorkloadType.ALL and len(to_be_search_value) > 0:
-            if to_be_search_filter == SearchFilters.USERNAME:
-                workloads = [workload for workload in workloads if to_be_search_value in workload["user"].lower()]
-            elif to_be_search_filter == SearchFilters.SESSION_ID:
-                workloads = [workload for workload in workloads if to_be_search_value in workload["id"].lower()]
-            elif to_be_search_filter == SearchFilters.USER_FULLNAME:
-                workloads = [workload for workload in workloads if to_be_search_value in workload["full_name"].lower()]
-            elif to_be_search_filter == SearchFilters.PROJECT:
-                workloads = [workload for workload in workloads if to_be_search_value in workload["project"].lower()]
-            elif to_be_search_filter == SearchFilters.SESSION_NAME:
-                workloads = [workload for workload in workloads if to_be_search_value in workload["name"].lower()]
-            elif to_be_search_filter == SearchFilters.NAMESPACE:
-                workloads = [workload for workload in workloads if to_be_search_value in workload["namespace"].lower()]
-            elif to_be_search_filter == SearchFilters.STATUS:
-                workloads = [workload for workload in workloads if to_be_search_value in workload["status"].lower()]
-            elif to_be_search_filter == SearchFilters.AGE:
-                workloads = [workload for workload in workloads if to_be_search_value in workload["age"].lower()]
-            elif to_be_search_filter == SearchFilters.RESOURCES:
-                workloads = [workload for workload in workloads if to_be_search_value in workload["resources"].lower()]
+        if search_filters:
+            for sf in search_filters:
+                param = sf.get("param")
+                val = sf.get("value", "").lower()
+                if not val:
+                    continue
+                
+                if param == SearchFilters.USERNAME.value:
+                    workloads = [w for w in workloads if w.get("user") and val in str(w["user"]).lower()]
+                elif param == SearchFilters.SESSION_ID.value:
+                    workloads = [w for w in workloads if w.get("id") and val in str(w["id"]).lower()]
+                elif param == SearchFilters.USER_FULLNAME.value:
+                    workloads = [w for w in workloads if w.get("full_name") and val in str(w["full_name"]).lower()]
+                elif param == SearchFilters.PROJECT.value:
+                    workloads = [w for w in workloads if w.get("project") and val in str(w["project"]).lower()]
+                elif param == SearchFilters.SESSION_NAME.value:
+                    workloads = [w for w in workloads if w.get("name") and val in str(w["name"]).lower()]
+                elif param == SearchFilters.NAMESPACE.value:
+                    workloads = [w for w in workloads if w.get("namespace") and val in str(w["namespace"]).lower()]
+                elif param == SearchFilters.STATUS.value:
+                    workloads = [w for w in workloads if w.get("status") and val in str(w["status"]).lower()]
+                elif param == SearchFilters.AGE.value:
+                    workloads = [w for w in workloads if w.get("age") and val in str(w["age"]).lower()]
+                elif param == SearchFilters.RESOURCES.value:
+                    workloads = [w for w in workloads if w.get("Resource Profile") and val in str(w["Resource Profile"]).lower()]
 
         counts = {item.value: 0 for item in WorkloadType if item != WorkloadType.ALL}
         for workload in workloads:
@@ -121,7 +117,6 @@ class WorkloadManager():
         if to_be_filter != WorkloadType.ALL:
             workloads = [workload for workload in workloads if workload["workload_type"] == to_be_filter.value]
 
-        # order by
         to_be_order_by = OrderByFilters.ALL
         if order_by is not None:
             to_be_order_by = order_by.lower()
@@ -140,8 +135,6 @@ class WorkloadManager():
 
         filters = {
             "filter": to_be_filter,
-            "search_filter": to_be_search_filter,
-            "search_value": to_be_search_value,
             "order_by_filter": to_be_order_by,
             "desc": to_be_desc
         }
@@ -153,13 +146,12 @@ class WorkloadManager():
         return json.loads(cached_data) if cached_data else {}
 
     def refresh(self):
-        """Forces an immediate update to Valkey (e.g., UI 'Refresh Data' button)"""
+        """Forces an immediate update to Valkey (e.g., UI 'Refresh Workload' button)"""
         self.fetch_and_cache()
 
     def cache_jobs(self):
         try:
             self.valkey.set("cml_heavy_sync_status", "running")
-
             success, jobs_payload, msg = False, [], ""
 
             # Retry loop: if blocked by the 2-minute lightweight sync, wait and try again
@@ -209,14 +201,44 @@ class WorkloadManager():
             logging.error(f"Error executing Lightweight Jobs cache: {e}")
             return False, str(e)
 
-    def get_jobs(self, user):
+    def get_jobs(self, user, search_filters):
         cached_data = self.valkey.get("cml_jobs")
         jobs = json.loads(cached_data, object_hook=datetime_decoder) if cached_data else []
 
         if not user.is_admin:
             jobs = [job for job in jobs if job["username"] == user.username]
 
-        return jobs
+        jobs_search_data = {
+            "name": list(set(str(j.get("name", "")) for j in jobs if j.get("name"))),
+            "username": list(set(str(j.get("username", "")) for j in jobs if j.get("username"))),
+            "project": list(set(str(j.get("project_name", "")) for j in jobs if j.get("project_name"))),
+            "script": list(set(str(j.get("script", "")) for j in jobs if j.get("script"))),
+            "job_type": list(set(str(j.get("job_type", "")) for j in jobs if j.get("job_type"))),
+            "status": list(set(str(j.get("last_run_status", "")) for j in jobs if j.get("last_run_status")))
+        }
+
+        for sf in search_filters:
+            param = sf.get("param")
+            val = sf.get("value", "").lower()
+            if not val:
+                continue
+
+            if param == "name":
+                jobs = [j for j in jobs if j.get("name") and val in str(j["name"]).lower()]
+            elif param == "username":
+                jobs = [j for j in jobs if j.get("username") and val in str(j["username"]).lower()]
+            elif param == "project":
+                jobs = [j for j in jobs if j.get("project_name") and val in str(j["project_name"]).lower()]
+            elif param == "script":
+                jobs = [j for j in jobs if j.get("script") and val in str(j["script"]).lower()]
+            elif param == "job_type":
+                jobs = [j for j in jobs if j.get("job_type") and val in str(j["job_type"]).lower()]
+            elif param == "status":
+                jobs = [j for j in jobs if j.get("last_run_status") and val in str(j["last_run_status"]).lower()]
+
+        jobs = sorted(jobs, key=lambda x: str(x.get("last_run_starting_time") or ""), reverse=True)
+
+        return jobs, jobs_search_data
 
     def group_workload_by_id(self, workloads):
         cached_jobs_str = self.valkey.get("cml_jobs")
@@ -270,7 +292,6 @@ class WorkloadManager():
             parent["ram"] = ram
             parent["Resource Profile"] = f"{cpu} vCPU / {ram} GiB Memory"
 
-            # 1. Standard sub-workload STUCK logic
             if has_no_running_sub_workloads and parent["status"] == WorkloadStatus.RUNNING:
                 parent["status"] = WorkloadStatus.STUCK
                 parent["reason"] = "No Running Executors"
@@ -282,7 +303,6 @@ class WorkloadManager():
             })
 
         for workload in grouped_workloads:
-            # 2. Scheduled Job Run STUCK logic using exact Dummy Time & Parent Finish Time logic
             if workload.get("workload_type") == "job" and workload.get("status") == WorkloadStatus.RUNNING:
                 job_id = ",".join([workload["project"], workload["name"]])
                 job = jobs_dict.get(job_id)
@@ -343,3 +363,4 @@ class WorkloadManager():
         """Reads worker node metrics from Valkey."""
         cached_data = self.valkey.get("cml_node_utilization")
         return json.loads(cached_data) if cached_data else []
+    
