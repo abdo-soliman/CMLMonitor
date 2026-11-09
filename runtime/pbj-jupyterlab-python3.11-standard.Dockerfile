@@ -1,5 +1,5 @@
-# Copyright 2025 Cloudera. All Rights Reserved.
-FROM ubuntu:24.04
+# Copyright 2026 Cloudera. All Rights Reserved.
+FROM ubuntu:noble-20260610
 ENV DEBIAN_FRONTEND=noninteractive \
     LC_ALL=en_US.UTF-8 LANG=C.UTF-8 LANGUAGE=en_US.UTF-8 \
     TERM=xterm \
@@ -13,18 +13,7 @@ RUN apt-get update && apt-get dist-upgrade -y && \
   locales \
   gpg \
   apt-transport-https \
-  unixodbc-dev \
-  libxml2-dev \
-  libxslt1-dev \
-  libgeos-dev \
-  libgdal-dev \
-  libproj-dev \
-  graphviz \
-  default-jre \
-  libomp-dev \
   krb5-user \
-  libkrb5-dev \
-  krb5-multidev \
   xz-utils \
   git \
   git-lfs \
@@ -36,30 +25,27 @@ RUN apt-get update && apt-get dist-upgrade -y && \
   nano \
   wget \
   less \
-  libsqlite3-dev \
-  libldap2-dev \
-  libssl-dev \
   ca-certificates ca-certificates-java \
   zlib1g-dev \
   libbz2-dev \
   liblzma-dev \
+  libssl-dev \
+  unixodbc \
+  unixodbc-dev \
   libsasl2-dev \
   libsasl2-2 \
   libsasl2-modules-gssapi-mit \
   libzmq3-dev \
-  valkey \
   cpio \
   cmake \
-  unixodbc \
-  mdbtools \
-  odbc-mdbtools \
   build-essential \
   patch autoconf automake \
   libgl-dev \
   libjpeg-dev \
   libpng-dev \
   fonts-roboto \
-  fonts-dejavu && \
+  fonts-dejavu \
+  tzdata && \
   apt-get clean && \
   apt-get autoremove --purge && \
   rm -rf /var/lib/apt/lists/* && \
@@ -79,6 +65,8 @@ RUN apt-get update && apt-get dist-upgrade -y && \
   ln -s /usr/lib/x86_64-linux-gnu/libsasl2.so.2 /usr/lib/x86_64-linux-gnu/libsasl2.so.3 && \
   mkdir -p /etc/pki/tls/certs && \
   ln -s /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt
+
+
 
 RUN apt-get update && apt-get dist-upgrade -y && \
   apt-get install -y --no-install-recommends \
@@ -107,15 +95,10 @@ RUN \
 COPY etc/pip.conf /etc/pip.conf
 
 ADD build/python-prebuilt-3.11.15-20260309-pkg.tar.gz /usr/local
-COPY requirements/python-standard-packages/requirements-3.11.txt /build/requirements.txt
-
-RUN ln -s /usr/local/bin/pip3 /usr/local/bin/pip
-RUN ln -s /usr/local/bin/python3 /usr/local/bin/python
-
-RUN ldconfig
-
+COPY requirements/py311/python-standard-packages-requirements.txt /build/requirements.txt
 
 RUN \
+    ldconfig && \
     pip3 config set install.user false && \
     pip3 install --no-cache-dir --no-warn-script-location -r requirements.txt && \
     rm -rf /build && \
@@ -123,13 +106,13 @@ RUN \
     rm -rf .cache .ipython .ivy2 .sbt .npm .yarn && \
     rm -rf /tmp/*
 
-ENV ML_RUNTIME_EDITOR="PBJ-Webv2.2" \
-    ML_RUNTIME_EDITION="PBJv2.2" \
+ENV ML_RUNTIME_EDITOR="PBJ Workbench" \
+    ML_RUNTIME_EDITION="Standard" \
     ML_RUNTIME_JUPYTER_KERNEL_GATEWAY_CMD="jupyter kernelgateway --config=/home/cdsw/.jupyter/jupyter_kernel_gateway_config.py" \
     JUPYTERLAB_WORKSPACES_DIR=/tmp \
     IPYTHONDIR=/tmp/.ipython
 
-COPY requirements/pbj-workbench-base/requirements-3.11.txt /build/requirements.txt
+COPY requirements/py311/pbj-workbench-base-requirements.txt /build/requirements.txt
 
 COPY etc/cloudera.mplstyle /etc/cloudera.mplstyle
 
@@ -137,31 +120,49 @@ RUN pip3 install --no-cache-dir --no-warn-script-location -r /build/requirements
     rm -rf /build
 
 ENV ML_RUNTIME_JUPYTER_KERNEL_NAME="python3" \
-    ML_RUNTIME_DESCRIPTION="PBJ Web Applications runtime v2.2"
+    ML_RUNTIME_DESCRIPTION="PBJ Workbench Python runtime provided by Cloudera"
     
 RUN \
   cd /root && \
   rm -rf .cache .ipython .ivy2 .sbt .npm .yarn && \
-  apt-get autoremove -y --purge && \
-  apt-get clean && rm -rf /var/lib/apt/lists/* && \
   rm -rf /tmp/*
 
-ENV ML_RUNTIME_EDITOR="JupyterLab-Webv2.2" \
-    ML_RUNTIME_EDITION="v2.2" \
-    ML_RUNTIME_DESCRIPTION="Jupyterlab Web application runtime v2.2"
+ENV ML_RUNTIME_EDITOR="JupyterLab" \
+    ML_RUNTIME_EDITION="Standard" \
+    ML_RUNTIME_DESCRIPTION="Jupyterlab Python runtime provided by Cloudera"
 
-COPY requirements/pbj-jupyterlab/requirements-3.11.txt /build/requirements.txt
+COPY requirements/py311/pbj-jupyterlab-requirements.txt /build/requirements.txt
 COPY etc/jupyterlab.sh /usr/local/bin/jupyterlab.sh
+COPY etc/jupyter_lab_config.py /usr/local/etc/jupyter_lab_config.py
+COPY etc/tectonic-nbconvert /usr/local/bin/tectonic-nbconvert
 COPY etc/read_default_copilot_model.py /usr/local/bin/read_default_copilot_model.py
 COPY etc/read_default_copilot_embedding_model.py /usr/local/bin/read_default_copilot_embedding_model.py
 
 RUN \
-  curl -s -o /tmp/nodejs.tar.xz https://nodejs.org/download/release/v20.8.1/node-v20.8.1-linux-x64.tar.xz && \
+  curl -fsSL --retry 3 --retry-delay 2 -o /tmp/nodejs.tar.xz https://nodejs.org/dist/v20.19.0/node-v20.19.0-linux-x64.tar.xz && \
   tar xJ -f /tmp/nodejs.tar.xz -C /usr/local --strip-components 1 && \
   npm install -g npm@10.5.2 && \
+  cd /tmp && \
+  PANDOC_VERSION=3.1.3 && \
+  PANDOC_TARBALL="pandoc-${PANDOC_VERSION}-linux-amd64.tar.gz" && \
+  curl -fsSL --retry 3 --retry-delay 2 -o pandoc.tar.gz "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/${PANDOC_TARBALL}" && \
+  tar xzf pandoc.tar.gz && \
+  install -m 0755 "/tmp/pandoc-${PANDOC_VERSION}/bin/pandoc" /usr/local/bin/pandoc && \
+  . /etc/os-release && \
+  if [ "$ID" = "ubuntu" ]; then \
+    apt-get update && apt-get install -y --no-install-recommends texlive-binaries; \
+  fi && \
+  TECTONIC_VERSION=0.13.1 && \
+  TECTONIC_TARBALL="tectonic-${TECTONIC_VERSION}-x86_64-unknown-linux-musl.tar.gz" && \
+  curl -fsSL --retry 3 --retry-delay 2 -o tectonic.tar.gz "https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%40${TECTONIC_VERSION}/${TECTONIC_TARBALL}" && \
+  tar xzf tectonic.tar.gz && \
+  install -m 0755 /tmp/tectonic /usr/local/bin/tectonic && \
+  rm -f /tmp/tectonic /tmp/tectonic.tar.gz && \
+  chmod +x /usr/local/bin/tectonic-nbconvert && \
+  cd /usr/local && \
   ln -sf /usr/local/bin/jupyterlab.sh /usr/local/bin/ml-runtime-editor && \
   chmod +x /usr/local/bin/jupyterlab.sh && \
-  pip3 install --no-cache-dir -r /build/requirements.txt && \
+  pip install --no-cache-dir -r /build/requirements.txt && \
   rm -rf /build && \
   cd /usr/local && \
   tar tJf /tmp/nodejs.tar.xz | \
@@ -172,22 +173,21 @@ RUN \
   jupyter labextension disable "@jupyterlab/apputils-extension:announcements" && \
   cd /root && \
   rm -rf .cache .ipython .ivy2 .sbt .npm .yarn && \
-  apt-get autoremove -y --purge && \
-  apt-get clean && rm -rf /var/lib/apt/lists/* && \
+  if [ "$ID" = "ubuntu" ]; then \
+    apt-get autoremove -y --purge && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*; \
+    fi && \
   rm -rf /tmp/*
 
-COPY python.tar.gz /tmp/python.tar.gz
-RUN pip3 install /tmp/python.tar.gz
-RUN rm -rf /tmp/*
-RUN pip3 install Flask-Compress psycopg2 PyMySQL pyOpenSSL seaborn selenium wheel pandas pyodbc croniter kubernetes datetime openpyxl xlsxwriter ldap3 flask pysqlite3-binary urllib3 Flask-Login Flask-LDAP3-Login Flask-SimpleLDAP Flask-Migrate Flask-WTF flask-pam Flask-SQLAlchemy google-auth pydantic pydantic[email] apscheduler psutil gunicorn python-dotenv requests_gssapi
+
 
 ENV \
     ML_RUNTIME_METADATA_VERSION=2 \ 
-    ML_RUNTIME_FULL_VERSION=9999.12.1-70047513 \
-    ML_RUNTIME_SHORT_VERSION=9999.12 \
+    ML_RUNTIME_FULL_VERSION=2026.08.1-b5 \
+    ML_RUNTIME_SHORT_VERSION=2026.08 \
     ML_RUNTIME_MAINTENANCE_VERSION=1 \
-    ML_RUNTIME_GIT_HASH=1f8fa1dd1da8a70ee91ad4a438f11ff143856266 \
-    ML_RUNTIME_GBN=70047513
+    ML_RUNTIME_GIT_HASH=f36d1ea370c0f6da7fee102265bfbd697c47694d \
+    ML_RUNTIME_GBN=81754395
 
 LABEL \
     com.cloudera.ml.runtime.runtime-metadata-version=$ML_RUNTIME_METADATA_VERSION \
