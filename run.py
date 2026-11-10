@@ -5,10 +5,9 @@ import signal
 import subprocess
 from gunicorn.app.base import BaseApplication
 
+# Safe fallback for WORK_DIR
 work_dir = os.getenv("WORK_DIR", ".")
 os.chdir(work_dir)
-
-from app import app
 
 
 class StandaloneApplication(BaseApplication):
@@ -89,11 +88,13 @@ if __name__ == "__main__":
         # 2. Start CML Background Poller
         poller_process = start_poller()
 
+        from app import app
+
         # 3. Launch Gunicorn Application
         PORT = int(os.environ["CDSW_APP_PORT"])
         options = {
             'bind': f'127.0.0.1:{PORT}',
-            'workers': 5,
+            'workers': 4,
             'timeout': 90,
             'accesslog': '-',
             'errorlog': '-'

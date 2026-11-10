@@ -7,6 +7,7 @@ import urllib3
 import logging
 import posixpath
 import concurrent.futures
+from pprint import pprint
 from urllib.parse import quote
 from collections import defaultdict
 from kubernetes import client, config
@@ -26,12 +27,32 @@ class CMLAPIManager:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
+            cls._instance._configured = False
         return cls._instance
 
-    def  __init__(self):
+    def __init__(self):
         if self._initialized:
             return
             
+        # Phase 1: Pure Python Defaults (Safe for Day-0 setup)
+        self.valkey = None
+        self.POD_CLUSTERING_WINDOW_SIZE = 120
+        self.WORKSPACE_DOMAIN = ""
+        self.API_KEY = ""
+        self.NAMESPACE_PREFIX = ""
+        self.KUBECONFIG_PATH = ""
+        self.ECS_WEBUI_BASE_URL = ""
+        self.LDAP_ENABLED = False
+        self.v1 = None
+        self.cml_client = None
+            
+        self._initialized = True
+
+    def initialize(self):
+        """Phase 2: Called only after setup is complete (init == 1) to load DB configurations."""
+        if self._configured:
+            return
+
         valkey_host = os.getenv("VALKEY_HOST", "localhost")
         valkey_port = int(os.getenv("VALKEY_PORT", 6379))
         self.valkey = redis.Redis(host=valkey_host, port=valkey_port, db=0, decode_responses=True)
@@ -40,17 +61,24 @@ class CMLAPIManager:
         
         with app.app_context():
             cml_configs = Config.get_configs("cml")
-            self.WORKSPACE_DOMAIN = cml_configs["WORKSPACE_DOMAIN"]
-            self.API_KEY = cml_configs["API_KEY"]
-            self.NAMESPACE_PREFIX = cml_configs["NAMESPACE_PREFIX"]
-            self.KUBECONFIG_PATH = cml_configs["KUBECONFIG_PATH"]
-            self.ECS_WEBUI_BASE_URL = cml_configs["ECS_WEBUI_BASE_URL"]
-            self.LDAP_ENABLED = Config.get_configs("ldap")["LDAP_ENABLED"]
+            self.WORKSPACE_DOMAIN = cml_configs.get("WORKSPACE_DOMAIN", "")
+            self.API_KEY = cml_configs.get("API_KEY", "")
+            self.NAMESPACE_PREFIX = cml_configs.get("NAMESPACE_PREFIX", "")
+            self.KUBECONFIG_PATH = cml_configs.get("KUBECONFIG_PATH", "")
+            self.ECS_WEBUI_BASE_URL = cml_configs.get("ECS_WEBUI_BASE_URL", "")
+            self.LDAP_ENABLED = Config.get_configs("ldap").get("LDAP_ENABLED", False)
 
-        config.load_kube_config(config_file=self.KUBECONFIG_PATH)
-        self.v1 = client.CoreV1Api()
-        self.cml_client = cmlapi.default_client(self.WORKSPACE_DOMAIN, self.API_KEY)
-        self._initialized = True
+        try:
+            if self.KUBECONFIG_PATH and os.path.exists(self.KUBECONFIG_PATH):
+                config.load_kube_config(config_file=self.KUBECONFIG_PATH)
+                self.v1 = client.CoreV1Api()
+
+            if self.WORKSPACE_DOMAIN and self.API_KEY:
+                self.cml_client = cmlapi.default_client(self.WORKSPACE_DOMAIN, self.API_KEY)
+        except Exception as e:
+            logging.error(f"Error during CML/Kube initialization: {e}")
+
+        self._configured = True
 
     def clean_projectname(self, project_name):
         result = project_name.replace("\u202f", ' ')
@@ -67,6 +95,8 @@ class CMLAPIManager:
 
     def get_project(self, project_id):
         try:
+            if not self.cml_client:
+                return None
             response = self.cml_client.get_project(project_id)
             project = response.to_dict()
             username = project["owner"]["username"].lower().replace(' ', '')
@@ -132,6 +162,8 @@ class CMLAPIManager:
 
     def get_user_from_namespace(self, namespace):
         try:
+            if not self.cml_client:
+                return None
             user_id = int(namespace.split('-')[-1])
             response = self.cml_client.get_short_user_by_id(user_id)
             return response.to_dict()["username"]
@@ -139,19 +171,29 @@ class CMLAPIManager:
             logging.error(f"Exception when fetching username from namespace: {e}")
             return None
 
-    def check_cml_connection(self):
+    def check_cml_connection(self, domain=None, api_key=None):
         try:
-            api_response = self.cml_client.list_workload_types_with_http_info()
+            target_domain = domain or self.WORKSPACE_DOMAIN
+            target_key = api_key or self.API_KEY
+            if not target_domain or not target_key:
+                return False, "Missing CML credentials."
+
+            temp_client = cmlapi.default_client(target_domain, target_key)
+            api_response = temp_client.list_workload_types_with_http_info()
             if api_response[1] == 200:
                 return True, None
             return False, f"Connection failed with the following status {api_response[1]} and the following HTTP Header: {api_response[2]}"
         except Exception as e:
             return False, str(e)
 
-    def is_cml_apikey_admin(self) -> bool:
+    def is_cml_apikey_admin(self, domain=None, api_key=None) -> bool:
         try:
+            target_domain = domain or self.WORKSPACE_DOMAIN
+            target_key = api_key or self.API_KEY
+            temp_client = cmlapi.default_client(target_domain, target_key)
+            
             body = cmlapi.CreateRuntimeRepoRequest()
-            self.cml_client.create_runtime_repo_with_http_info(body)
+            temp_client.create_runtime_repo_with_http_info(body)
             return True
         except cmlapi.rest.ApiException as e:
             if e.status == 400:
@@ -176,6 +218,9 @@ class CMLAPIManager:
             return False, f"Unexpected error connecting to Kubernetes: {str(e)}"
 
     def get_running_pods(self, cutoff_age_seconds):
+        if not self.v1:
+            return []
+
         config.load_kube_config(config_file=self.KUBECONFIG_PATH)
         now = datetime.now(timezone.utc)
         pods = []
@@ -184,7 +229,7 @@ class CMLAPIManager:
             for pod in response.items:
                 pod_name = pod.metadata.name
                 namespace = pod.metadata.namespace
-                phase = pod.status.phase 
+                phase = pod.status.phase
                 status = "unknown"
                 reason = None
                 start_time = pod.status.start_time
@@ -247,8 +292,12 @@ class CMLAPIManager:
             return pods
         except ApiException as e:
             logging.error(f"Exception when calling CoreV1Api->list_pod_for_all_namespaces:{e}\n")
+            return []
 
     def get_running_sessions(self, start, end):
+        if not self.cml_client:
+            return []
+            
         sort = 'created_at'
         page_size = 100000
         time_range_search_filter = "{\"created_time\":{\"min\":\"" + start + "\",\"max\":\"" + end + "\"}}"
@@ -258,6 +307,7 @@ class CMLAPIManager:
             return response["usage_response"]
         except cmlapi.rest.ApiException as e:
             logging.error(f"Exception when calling CMLServiceApi->list_usage: {e}")
+            return []
 
     def match_pods_with_cml_workload(self, pods, cml_workloads):
         unified_workloads = []
@@ -374,6 +424,9 @@ class CMLAPIManager:
 
     def sync_runtimes(self):
         """Fetches runtimes from CML API and updates the local database in a tight transaction."""
+        if not self.cml_client:
+            return False
+            
         # Use Valkey as a distributed lock with a 60-second expiration
         if not self.valkey.set("runtimes_sync_lock", "locked", nx=True, ex=60):
             return False
@@ -539,6 +592,28 @@ class CMLAPIManager:
 
         return local_jobs_payload, local_db_updates
 
+    def _fetch_single_job_run(self, job_id, project_id):
+        """Worker function for lightweight sync."""
+        try:
+            runs_response = self.cml_client.list_job_runs(project_id, job_id, sort="-created_at", page_size=1)
+            runs = runs_response.to_dict().get("job_runs", [])
+            if runs:
+                last_run = runs[0]
+
+                raw_status = last_run.get("status", "Unknown")
+                status = str(raw_status).capitalize()
+                if isinstance(raw_status, str) and len(raw_status.split("_")) == 2:
+                    status = raw_status.split("_")[1].capitalize()
+
+                return job_id, {
+                    "starting_at": last_run.get("starting_at"),
+                    "finished_at": last_run.get("finished_at"),
+                    "status": status
+                }
+        except:
+            pass
+        return job_id, None
+
     def sync_jobs(self):
         """FULL SYNC: Fetches projects, jobs, and runs. Updates DB and Valkey."""
         if not self.cml_client:
@@ -606,28 +681,6 @@ class CMLAPIManager:
         finally:
             self.valkey.delete("cml_jobs_sync_lock")
 
-    def _fetch_single_job_run(self, job_id, project_id):
-        """Worker function for lightweight sync."""
-        try:
-            runs_response = self.cml_client.list_job_runs(project_id, job_id, sort="-created_at", page_size=1)
-            runs = runs_response.to_dict().get("job_runs", [])
-            if runs:
-                last_run = runs[0]
-
-                raw_status = last_run.get("status", "Unknown")
-                status = str(raw_status).capitalize()
-                if isinstance(raw_status, str) and len(raw_status.split("_")) == 2:
-                    status = raw_status.split("_")[1].capitalize()
-
-                return job_id, {
-                    "starting_at": last_run.get("starting_at"),
-                    "finished_at": last_run.get("finished_at"),
-                    "status": status
-                }
-        except:
-            pass
-        return job_id, None
-
     def sync_jobs_lightweight(self):
         """LIGHTWEIGHT SYNC: Rapidly updates runs for known jobs."""
         if not self.cml_client:
@@ -661,6 +714,9 @@ class CMLAPIManager:
             self.valkey.delete("cml_jobs_sync_lock")
 
     def get_worker_node_utilization(self):
+        if not self.v1:
+            return []
+            
         try:
             config.load_kube_config(config_file=self.KUBECONFIG_PATH)
             nodes = self.v1.list_node().items

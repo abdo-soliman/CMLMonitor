@@ -1,6 +1,8 @@
+import os
 import time
 import logging
-import os
+from models import Config
+from extensions import app
 from workload_manager import WorkloadManager
 
 logging.basicConfig(
@@ -14,7 +16,22 @@ POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", 60))
 
 def main():
     logging.info(f"Starting CML Background Poller. Update interval set to {POLL_INTERVAL} seconds.")
-    
+
+    with app.app_context():
+        # 1. Wait for the main Gunicorn application to finish DB migrations and Day-0 Setup
+        setup_complete = False
+        while not setup_complete:
+            try:
+                init_config = Config.query.filter_by(attr='init').first()
+                if init_config and init_config.value == '1':
+                    setup_complete = True
+                    break
+            except Exception:
+                pass
+
+            logging.info("Waiting for database migrations and initial setup to complete...")
+            time.sleep(5)
+
     # Initialize the manager (which connects to Valkey)
     manager = WorkloadManager()
 

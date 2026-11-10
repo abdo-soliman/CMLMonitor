@@ -38,6 +38,7 @@ class WorkloadManager():
             return
 
         self.cmlapi_manager = CMLAPIManager()
+        self.cmlapi_manager.initialize()
         valkey_host = os.getenv("VALKEY_HOST", "localhost")
         valkey_port = int(os.getenv("VALKEY_PORT", 6379))
         self.valkey = redis.Redis(host=valkey_host, port=valkey_port, db=0, decode_responses=True)
@@ -57,7 +58,7 @@ class WorkloadManager():
 
             self.valkey.set("cml_workloads", json.dumps(grouped_workloads, cls=DateTimeEncoder))
             self.valkey.set("cml_search_data", json.dumps(search_data, cls=DateTimeEncoder))
-
+            
             logging.info("Successfully updated Valkey cache.")
             self.valkey.set("cml_workload_sync_status", "success")
             return True, "Workload cache updated."
@@ -72,7 +73,6 @@ class WorkloadManager():
         cached_data = self.valkey.get("cml_workloads")
         workloads = json.loads(cached_data, object_hook=datetime_decoder) if cached_data else []
 
-        # filter for user workload if user is not admin
         if not user.is_admin:
             workloads = [workload for workload in workloads if workload["user"] == user.username]
 
@@ -146,7 +146,6 @@ class WorkloadManager():
         return json.loads(cached_data) if cached_data else {}
 
     def refresh(self):
-        """Forces an immediate update to Valkey (e.g., UI 'Refresh Workload' button)"""
         self.fetch_and_cache()
 
     def cache_jobs(self):
@@ -154,7 +153,6 @@ class WorkloadManager():
             self.valkey.set("cml_heavy_sync_status", "running")
             success, jobs_payload, msg = False, [], ""
 
-            # Retry loop: if blocked by the 2-minute lightweight sync, wait and try again
             for _ in range(10):
                 success, jobs_payload, msg = self.cmlapi_manager.sync_jobs()
                 if success or "already in progress" not in msg:
@@ -179,13 +177,11 @@ class WorkloadManager():
         try:
             cached_data = self.valkey.get("cml_jobs")
             if not cached_data:
-                # Fallback to full sync if no cache exists
                 return self.cache_jobs()
 
             success, updates, msg = self.cmlapi_manager.sync_jobs_lightweight()
             
             if success:
-                # Merge updates directly into the UI payload
                 jobs_payload = json.loads(cached_data, object_hook=datetime_decoder)
                 for job in jobs_payload:
                     if job["id"] in updates:
@@ -279,7 +275,7 @@ class WorkloadManager():
                 if parent:
                     workload["workload_type"] = parent["workload_type"]
 
-                if workload["status"] == WorkloadStatus.RUNNING or (workload["status"] == WorkloadStatus.PENDING and workload["age_seconds"] < 120):
+                if workload["status"] == WorkloadStatus.RUNNING:
                     has_no_running_sub_workloads = False
 
                 items.append(workload)
@@ -308,7 +304,6 @@ class WorkloadManager():
                 job = jobs_dict.get(job_id)
                 if job:
                     if job["job_type"] == "cron":
-                        # CML uses datetime(1, 1, 1) for skipped/stuck cron runs
                         last_run_start_time = job["last_run_starting_time"]
                         if last_run_start_time and getattr(last_run_start_time, 'year', None) == 1:
                             workload["status"] = WorkloadStatus.STUCK

@@ -14,8 +14,8 @@ import subprocess
 import pandas as pd
 from sqlalchemy import event
 from datetime import datetime
-from flask_migrate import Migrate
 from pydantic import ValidationError
+from flask_migrate import Migrate, upgrade
 from werkzeug.security import check_password_hash, generate_password_hash
 from flask_login import LoginManager, login_user, login_required, current_user, logout_user
 from flask import Flask, flash, render_template, request, redirect, url_for, jsonify, send_file, current_app
@@ -51,7 +51,7 @@ login_manager.init_app(app)
 login_manager.login_view = 'login'
 login_manager.login_message = None
 
-cmlapi_manager = CMLAPIManager()
+cmlapi_manager = None
 workload_manager = None
 APP_VERSION = "2.0"
 
@@ -105,35 +105,35 @@ def node_stats_daemon(app_context):
             time.sleep(3)
 
 
-def init_workload_manager():
-    """Helper function to instantiate and start the global workload manager."""
-    global workload_manager
+def init_background_services():
+    """Instantiates managers and starts background daemons once setup is verified."""
+    global cmlapi_manager, workload_manager
+
+    if cmlapi_manager is None:
+        cmlapi_manager = CMLAPIManager()
+    cmlapi_manager.initialize()
     if workload_manager is None:
         workload_manager = WorkloadManager()
-        print("Workload Manager initialized and caching started.")
 
-        app_context = app.app_context()
-        t = threading.Thread(target=runtime_sync_daemon, args=(app_context,), daemon=True)
-        t.start()
+    workload_manager.fetch_and_cache()
+    print("Background services initialized and caching started.")
 
-        t_stats = threading.Thread(target=node_stats_daemon, args=(app_context,), daemon=True)
-        t_stats.start()
+    app_context = app.app_context()
+    t = threading.Thread(target=runtime_sync_daemon, args=(app_context,), daemon=True)
+    t.start()
 
-        t_jobs = threading.Thread(target=jobs_sync_daemon, args=(app_context,), daemon=True)
-        t_jobs.start()
+    t_stats = threading.Thread(target=node_stats_daemon, args=(app_context,), daemon=True)
+    t_stats.start()
 
-        t_jobs_light = threading.Thread(target=jobs_light_sync_daemon, args=(app_context,), daemon=True)
-        t_jobs_light.start()
+    t_jobs = threading.Thread(target=jobs_sync_daemon, args=(app_context,), daemon=True)
+    t_jobs.start()
+
+    t_jobs_light = threading.Thread(target=jobs_light_sync_daemon, args=(app_context,), daemon=True)
+    t_jobs_light.start()
 
 
 def is_cml_configed():
-    """
-    Checks if CML Configurations are set in the configs table
-
-    Params:
-    Returns: cml_configured -> boolean, True if all CML configurations are not none or empty strings
-    """
-
+    """Checks if CML Configurations are set in the configs table."""
     with app.app_context():
         cml_configs = Config.query.filter(Config.attr.like('cml.%')).all()
         configs = {config.attr: config.value for config in cml_configs}
@@ -141,30 +141,37 @@ def is_cml_configed():
         return not (is_none_or_empty(configs['cml.workspace_domain']) or is_none_or_empty(configs['cml.api_key']) or is_none_or_empty(configs['cml.namespace_prefix']) or is_none_or_empty(configs['cml.kubeconfig_path']))
 
 
-# Create tables and initialize workload/alert processes before running
+# --- COMPLETE STARTUP SEQUENCE ---
 with app.app_context():
     try:
+        # 1. Migrate database to latest schema (creates it if it doesn't exist)
+        upgrade()
+        print("Database schema successfully migrated/verified.")
+        
+        # 2. Keep configs table up to date (adds missing defaults for new updates)
+        admin_user = db.session.execute(db.select(User).filter_by(config_admin=True)).scalars().first()
+        if admin_user:
+            init_configs(admin_user.username)
+        
+        # 3. Check if setup is fully completed and boot manager services
         init_config = Config.query.filter_by(attr='init').first()
         if init_config and init_config.value == '1':
-            init_workload_manager()
+            init_background_services()
+
+            # 4. Sync alert subprocesses
+            enabled_conf = Config.query.filter_by(attr='alert.enabled').first()
+            if enabled_conf and enabled_conf.value == '1':
+                print("Alerts enabled in DB. Syncing background processes...")
+                alert_cron_conf = Config.query.filter_by(attr='alert.runtime.alert_cron').first()
+                report_cron_conf = Config.query.filter_by(attr='alert.runtime.report_cron').first()
+
+                if alert_cron_conf and alert_cron_conf.value.strip():
+                    process_manager.start_process('alert', '24h')
+                if report_cron_conf and report_cron_conf.value.strip():
+                    process_manager.start_process('report', '1s')
+                    
     except Exception as e:
-        print(f"Skipping WorkloadManager initialization: {e}")
-
-    try:
-        enabled_conf = Config.query.filter_by(attr='alert.enabled').first()
-        if enabled_conf and enabled_conf.value == '1':
-            print("Alerts enabled in DB. Syncing background processes...")
-
-            alert_cron_conf = Config.query.filter_by(attr='alert.runtime.alert_cron').first()
-            report_cron_conf = Config.query.filter_by(attr='alert.runtime.report_cron').first()
-
-            if alert_cron_conf and alert_cron_conf.value.strip():
-                process_manager.start_process('alert', '24h')
-
-            if report_cron_conf and report_cron_conf.value.strip():
-                process_manager.start_process('report', '1s')
-    except Exception as e:
-        print(f"Warning: Could not sync background processes on boot: {e}")
+        logging.error(f"Skipping startup sequence initialization (DB likely on Day-0): {e}")
 
 
 def sync_alert_processes(app):
@@ -233,8 +240,6 @@ def page_not_found(e):
 @app.before_request
 def enforce_access_policies():
     """Runs before every request to enforce global security and state policies."""
-    
-    # Allow safe routing during the absolute initial setup phase
     allowed_admin_setup = ['setup_admin_page', 'create_admin', 'static']
     
     try:
@@ -347,14 +352,17 @@ def login():
 
             if (user is None or user.is_external) and not is_ldap_enabled():
                 return render_template('login.html', error="Invalid credentials")
+            
             if user and user.is_external:
                 if authenticate_and_user_data(username, password):
                     login_user(user)
                     return redirect(url_for('home'))
+            
             elif user:
                 if user.password and check_password_hash(user.password, password):
                     login_user(user)
                     return redirect(url_for('home'))
+            
             else:
                 user_data = authenticate_and_user_data(username, password)
                 if user_data:
@@ -375,6 +383,7 @@ def login():
                     return redirect(url_for('home'))
 
             return render_template('login.html', error="Invalid credentials")
+            
         except Exception as e:
             db.session.rollback()
             logging.error(f"Login error for user {username}: {e}")
@@ -407,9 +416,12 @@ def setup_wizard():
 @app.route('/api/setup/test-cml', methods=['POST'])
 @login_required
 def test_setup_cml_connection():
-    """Endpoint to test CML credentials before allowing the user to proceed."""
     if not current_user.config_admin:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
+
+    global cmlapi_manager
+    if cmlapi_manager is None:
+        cmlapi_manager = CMLAPIManager()
 
     data = request.json
     domain = data.get('cml_workspace_domain')
@@ -419,19 +431,15 @@ def test_setup_cml_connection():
     if not kube_content:
         return jsonify({"success": False, "message": "Kubeconfig file content is missing."})
 
-    # Test CML Connection
     connected, message = cmlapi_manager.check_cml_connection(domain, api_key)
     if connected:
-        # Test that the API Key is for an admin user.
         if cmlapi_manager.is_cml_apikey_admin(domain, api_key):
             tmp_path = None
             try:
-                # Create a temporary file in /tmp to write rke3.yaml to it for testing
                 with tempfile.NamedTemporaryFile(mode='w', delete=False, dir='/tmp', suffix='.yaml') as tmp_file:
                     tmp_file.write(kube_content)
                     tmp_path = tmp_file.name
 
-                # Test the kubenetes connection using the uploaded yaml file
                 kube_connected, kube_message = cmlapi_manager.test_kube_config(tmp_path)
 
                 if kube_connected:
@@ -441,7 +449,6 @@ def test_setup_cml_connection():
             except Exception as e:
                 return jsonify({"success": False, "message": f"Error handling kubeconfig: {str(e)}"})
             finally:
-                # Delete the temporary file
                 if tmp_path and os.path.exists(tmp_path):
                     os.remove(tmp_path)
         else:
@@ -453,32 +460,30 @@ def test_setup_cml_connection():
 @app.route('/api/config/test-cml', methods=['POST'])
 @login_required
 def test_config_cml_connection():
-    """Endpoint to test CML credentials before allowing the user to proceed."""
     if not current_user.config_admin:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
+
+    global cmlapi_manager
+    if cmlapi_manager is None:
+        cmlapi_manager = CMLAPIManager()
 
     data = request.json
     domain = data.get('cml_workspace_domain')
     api_key = data.get('cml_api_key')
     kube_content = data.get('cml_kubeconfig_content')
 
-    # Test CML Connection
     connected, message = cmlapi_manager.check_cml_connection(domain, api_key)
     if connected:
-        # Test that the API Key is for an admin user.
         if cmlapi_manager.is_cml_apikey_admin(domain, api_key):
             if not kube_content:
-                # SKIP K8s TEST
                 return jsonify({"success": True, "message": "CML configured successfully (Kubernetes test skipped as no new file was provided)."})
             else:
                 tmp_path = None
                 try:
-                    # Create a temporary file in /tmp to write rke3.yaml to it for testing
                     with tempfile.NamedTemporaryFile(mode='w', delete=False, dir='/tmp', suffix='.yaml') as tmp_file:
                         tmp_file.write(kube_content)
                         tmp_path = tmp_file.name
 
-                    # Test the kubenetes connection using the uploaded yaml file
                     kube_connected, kube_message = cmlapi_manager.test_kube_config(tmp_path)
 
                     if kube_connected:
@@ -488,7 +493,6 @@ def test_config_cml_connection():
                 except Exception as e:
                     return jsonify({"success": False, "message": f"Error handling kubeconfig: {str(e)}"})
                 finally:
-                    # Delete the temporary file
                     if tmp_path and os.path.exists(tmp_path):
                         os.remove(tmp_path)
         else:
@@ -590,7 +594,6 @@ def api_config_dry_run():
     ]
 
     try:
-        # Use Popen to launch the process in the background and return instantly
         subprocess.Popen(cmd, cwd=os.environ.get("WORK_DIR", "."))
         return jsonify({"success": True, "message": f"{mode.capitalize()} Dry Run scheduled. Check the inbox shortly!"})
     except Exception as e:
@@ -600,7 +603,6 @@ def api_config_dry_run():
 @app.route('/api/setup/save', methods=['POST'])
 @login_required
 def save_setup():
-    """Saves the wizard configs and locks the setup by setting init=1."""
     if not current_user.config_admin:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
 
@@ -608,7 +610,6 @@ def save_setup():
     if init_config and init_config.value == '1':
          return jsonify({"success": False, "message": "Setup already completed."}), 400
 
-    # Map the abstract frontend/schema keys to the actual database attributes
     SCHEMA_TO_DB_MAP = {
         'cml_workspace_domain': 'cml.workspace_domain',
         'cml_api_key': 'cml.api_key',
@@ -640,7 +641,6 @@ def save_setup():
             "message": f"Validation Error on '{error_field}': {error_msg}"
         }), 400
 
-    # --- Save the rke2.yaml file ---
     secure_dir = os.path.join(current_app.root_path, 'secure_configs')
     os.makedirs(secure_dir, exist_ok=True)
     kubeconfig_path = os.path.join(secure_dir, 'rke2.yaml')
@@ -651,11 +651,9 @@ def save_setup():
     except Exception as e:
         return jsonify({"success": False, "message": f"Failed to save kubeconfig file to disk: {str(e)}"}), 500
 
-    # Iterate through the mapping and update the database
     for schema_key, db_attr in SCHEMA_TO_DB_MAP.items():
         value = getattr(validated_data, schema_key)
 
-        # Convert values to strings for the database (e.g., True -> '1', False -> '0', None -> '')
         if isinstance(value, bool):
             str_value = '1' if value else '0'
         elif value is None:
@@ -668,20 +666,18 @@ def save_setup():
             config_item.value = str_value
             config_item.updated_by = current_user.username
 
-    # Manually update the file path record
     kube_path_config = Config.query.filter_by(attr='cml.kubeconfig_path').first()
     if kube_path_config:
         kube_path_config.value = kubeconfig_path
         kube_path_config.updated_by = current_user.username
 
-    # Lock the initial setup
     if init_config:
         init_config.value = '1'
         init_config.updated_by = current_user.username
 
     try:
         db.session.commit()
-        init_workload_manager()
+        init_background_services()
         return jsonify({"success": True, "message": "Setup completed successfully."})
     except Exception as e:
         db.session.rollback()
@@ -694,9 +690,10 @@ def home():
     if not current_user or current_user.is_anonymous:
         return redirect(url_for('login'))
 
-    workloads, counts, _ = workload_manager.get(current_user)
+    workloads, counts, _ = workload_manager.get(current_user) if workload_manager else ([], {item.value: 0 for item in WorkloadType}, {})
     start_index, end_index, _, _, max_number_of_pages = pagination_to_indecies(25, 1, len(workloads))
-    search_data_json = json.dumps(workload_manager.get_search_data(), default=list)
+    search_data_json = json.dumps(workload_manager.get_search_data(), default=list) if workload_manager else "[]"
+    
     user = {
         "username": current_user.username,
         "fullname": current_user.fullname,
@@ -710,11 +707,11 @@ def home():
                         cml_configured=is_cml_configed(), \
                         workloads=workloads[start_index:end_index], \
                         search_data=search_data_json, \
-                        num_sessions=counts[WorkloadType.SESSION.value], \
-                        num_applications=counts[WorkloadType.APPLICATION.value], \
-                        num_jobs=counts[WorkloadType.JOB.value], \
-                        num_orphans=counts[WorkloadType.ORPHAN.value], \
-                        total_number_of_workload=counts[WorkloadType.ALL.value], \
+                        num_sessions=counts.get(WorkloadType.SESSION.value, 0), \
+                        num_applications=counts.get(WorkloadType.APPLICATION.value, 0), \
+                        num_jobs=counts.get(WorkloadType.JOB.value, 0), \
+                        num_orphans=counts.get(WorkloadType.ORPHAN.value, 0), \
+                        total_number_of_workload=counts.get(WorkloadType.ALL.value, 0), \
                         max_pages=max_number_of_pages, \
                         app_version=APP_VERSION)
 
@@ -805,14 +802,12 @@ def config():
     configs.pop('ldap.bind_password', None)
     configs.pop('alert.smtp.password', None)
 
-    # cast string to string array
-    alert_recipient_emails = ast.literal_eval(configs["alert.smtp.alert_recipient_emails"])
-    report_recipient_emails = ast.literal_eval(configs["alert.smtp.report_recipient_emails"])
+    alert_recipient_emails = ast.literal_eval(configs.get("alert.smtp.alert_recipient_emails", "[]"))
+    report_recipient_emails = ast.literal_eval(configs.get("alert.smtp.report_recipient_emails", "[]"))
 
     configs["alert_emails"] = ",".join(alert_recipient_emails)
     configs["report_emails"] = ",".join(report_recipient_emails)
 
-    # Grab the active tab from the URL, default to 'ldap'
     active_tab = request.args.get('active_tab', 'ldap')
 
     return render_template('config.html', \
@@ -946,7 +941,6 @@ def update_cml():
         try:
             with open(kubeconfig_path, 'w', encoding='utf-8') as f:
                 f.write(valid_data.kubeconfig_content)
-            # Update the path in the database
             kube_path_config = Config.query.filter_by(attr='cml.kubeconfig_path').first()
             if kube_path_config:
                 kube_path_config.value = kubeconfig_path
@@ -1076,7 +1070,6 @@ def api_get_users():
             "fullname": u.fullname or "-",
             "mail": u.mail or "-",
             "is_external": u.is_external,
-            # Explicit boolean casting to prevent SQLite type bleeding
             "is_admin": bool(u.is_admin),
             "config_admin": bool(u.config_admin),
             "can_edit": (not u.is_external) and (u.id != current_user.id)
@@ -1262,11 +1255,9 @@ def api_delete_user():
     if not target_user:
         return jsonify({"success": False, "message": "User not found."}), 404
 
-    # Cannot delete self
     if target_user.id == current_user.id:
         return jsonify({"success": False, "message": "You cannot remove your own account."}), 400
 
-    # Cannot delete the last config_admin
     if target_user.config_admin:
         admin_count = User.query.filter_by(config_admin=True).count()
         if admin_count <= 1:
@@ -1346,25 +1337,27 @@ def get_data():
     try:
         new_filter = WorkloadType(filter)
         new_order_by_filter = OrderByFilters(order_by_filter)
-
-        workloads, counts, filters = workload_manager.get(current_user, new_filter, search_filters, order_by=new_order_by_filter, desc=order_by_desc)
+        
+        workloads, counts, filters = ([], {}, {})
+        if workload_manager:
+            workloads, counts, filters = workload_manager.get(current_user, new_filter, search_filters, order_by=new_order_by_filter, desc=order_by_desc)
 
         start_index, end_index, page_number, page_size, max_number_of_pages = pagination_to_indecies(page_size, page_number, len(workloads))
-        search_data_json = json.dumps(workload_manager.get_search_data(), default=list)
+        search_data_json = json.dumps(workload_manager.get_search_data(), default=list) if workload_manager else "[]"
 
         return jsonify({
             "page_number": page_number,
             "page_size": page_size,
             "max_pages": max_number_of_pages,
-            "filter": filters["filter"],
+            "filter": filters.get("filter", "all"),
             "search_data": search_data_json,
-            "order_by_filter": filters["order_by_filter"],
-            "desc": filters["desc"],
-            "total_number_of_workload": counts[WorkloadType.ALL.value],
-            "num_sessions": counts[WorkloadType.SESSION.value],
-            "num_applications": counts[WorkloadType.APPLICATION.value],
-            "num_jobs": counts[WorkloadType.JOB.value],
-            "num_orphans": counts[WorkloadType.ORPHAN.value],
+            "order_by_filter": filters.get("order_by_filter", "all"),
+            "desc": filters.get("desc", False),
+            "total_number_of_workload": counts.get(WorkloadType.ALL.value, 0),
+            "num_sessions": counts.get(WorkloadType.SESSION.value, 0),
+            "num_applications": counts.get(WorkloadType.APPLICATION.value, 0),
+            "num_jobs": counts.get(WorkloadType.JOB.value, 0),
+            "num_orphans": counts.get(WorkloadType.ORPHAN.value, 0),
             "payload": workloads[start_index:end_index]
         })
     except ValueError:
@@ -1383,7 +1376,6 @@ def download_excel():
         
         df.drop(columns=['show_full_name', 'age_seconds'], errors='ignore', inplace=True)
 
-        # localizing tz to None because Excel does not support timezone-aware datetimes.
         for col in df.select_dtypes(['datetimetz']).columns:
             df[col] = df[col].dt.tz_localize(None)
 
@@ -1409,7 +1401,10 @@ def api_sync_runtimes():
     if not current_user.is_admin:
         return jsonify({"error": "Unauthorized"}), 403
     
-    success = cmlapi_manager.sync_runtimes()
+    success = False
+    if cmlapi_manager:
+        success = cmlapi_manager.sync_runtimes()
+        
     if success:
         return jsonify({"success": True, "message": "Runtimes synced successfully."})
     else:
@@ -1441,7 +1436,7 @@ def api_jobs():
     except:
         search_filters = []
 
-    jobs_data, jobs_search_data = workload_manager.get_jobs(current_user, search_filters) if workload_manager else []
+    jobs_data, jobs_search_data = workload_manager.get_jobs(current_user, search_filters) if workload_manager else ([], {})
     start_index, end_index, page_number, page_size, max_number_of_pages = pagination_to_indecies(page_size, page_number, len(jobs_data))
 
     return jsonify({
@@ -1490,8 +1485,8 @@ def api_sync_jobs_status():
     if not current_user.is_admin:
         return jsonify({"error": "Unauthorized"}), 403
 
-    status = workload_manager.valkey.get("cml_heavy_sync_status") or "idle"
-    return jsonify({"status": status})
+    status = workload_manager.valkey.get("cml_heavy_sync_status") if workload_manager else "failed"
+    return jsonify({"status": status or "idle"})
 
 
 # --- Stats Routes ---
