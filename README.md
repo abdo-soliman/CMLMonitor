@@ -8,94 +8,95 @@
 
 ## Overview
 
-**CML Monitor** is a Flask-based web application designed to serve as a unified monitoring dashboard for Cloudera Machine Learning (CML), recently renamed to [Cloudera AI](https://docs.cloudera.com/machine-learning/cloud/product/topics/ml-product-overview.html). 
+**CML Monitor v2.0** is a Flask-based web application designed to serve as a comprehensive, proactive administrative console for Cloudera Machine Learning (CML), recently renamed to [Cloudera AI](https://docs.cloudera.com/machine-learning/cloud/product/topics/ml-product-overview.html). 
 
-The application connects to the underlying Kubernetes cluster running on Cloudera ECS Hosts via an `rke2.yaml` configuration file. It uses this configuration to look up all running Kubernetes pods and intelligently matches them with active workloads on CML via the CML API. 
+The application connects to the underlying Kubernetes cluster running on Cloudera ECS Hosts via an `rke2.yaml` configuration file. It uses this configuration to look up all running Kubernetes pods and intelligently matches them with active workloads on CML via the CML API. Version 2.0 introduces an enterprise-grade architecture utilizing Valkey/Redis for decoupled, asynchronous data syncing, enabling lightning-fast UI responsiveness and real-time metric tracking.
 
 ## Features
 
-* **Unified Dashboard:** A centralized home page displaying active workloads across CML, complete with advanced filtering (Sessions, Applications, Jobs), search functionalities, and Excel report downloads.
-* **Role-Based Visibility:** Local and LDAP users can be restricted to viewing only their own workloads, while Admins (`is_admin`) can monitor all cluster activity.
-* **Automated Alerts & Reports:** Background processes monitor the cluster to send alert emails for "zombie" sessions (running $\ge$ 24 hours) and scheduled summary reports of all workloads via SMTP.
-* **In-App Configuration Management:** A dedicated settings UI for authorized admins (`config_admin`) to modify CML, LDAP, and Alert parameters on the fly.
+* **Unified Dashboards & Metrics:** Centralized pages for active workloads, cross-project jobs, and available runtimes. Includes live, 3-second updates on cluster-wide worker node CPU and RAM utilization.
+* **Smart Stuck Workload Detection:** Automatically identifies orphaned Kubernetes pods, workloads with dead Spark executors, and stalled job schedules (e.g., jobs stuck running while a parent job has already completed a newer run).
+* **Advanced Search & Visibility:** Apache Ranger-style Multi-Parameter Search with smart auto-complete. Workloads include direct links to CML projects, Runtime Editor versions, and Kubernetes namespaces.
+* **Role-Based Visibility & UI User Management:** Manage local and LDAP users directly from the UI. Users see only their workloads unless granted admin rights (`is_admin`).
+* **Automated Alerts & Dry Runs:** Background processes monitor the cluster to send alert emails for "zombie" sessions and scheduled summary reports via SMTP. Safely test these notifications using the new Alert Dry Run feature.
+* **In-App Configuration & Log Streaming:** A dedicated settings UI for authorized admins (`config_admin`) to modify CML, LDAP, and Alert parameters on the fly, alongside live Application Log streaming directly within the browser.
 
 ---
 
 ## Deployment & Setup Flow
 
-The application is built to run natively as a **CML Application** using a custom runtime called `CMLWeb`. 
+The application is built to run natively as a **CML Application** using a custom runtime called `CMLWeb`. Version 2.0 massively simplifies this build process.
 
 ### 1. Build the Custom Runtime (`CMLWeb`)
-To run this application on CML, you must first build the required runtime environment using Cloudera's base images. Follow these steps:
+You no longer need to clone external Cloudera repositories. All files needed to build a custom Jupyter runtime with the required Python packages are bundled in this repository.
 
-1. **Clone the Cloudera ML Runtimes repository:**
+1. **Clone this repository:**
    ```bash
-   git clone https://github.com/cloudera/ml-runtimes.git
-   cd ml-runtimes
+   git clone https://github.com/abdo-soliman/CMLMonitor
+   cd CMLMonitor
    ```
 
-2. **Prepare the Dockerfile:**
-   Move the `cmlweb.Dockerfile` provided in this repository into the cloned `ml-runtimes` directory and rename it to `Dockerfile`.
+2. **Build the Docker Image:**
+   Run the following command to build the image (disabling the cache ensures you get the latest base layers):
    ```bash
-   mv /path/to/CMLMonitor/cmlweb.Dockerfile ./Dockerfile
+   docker build --no-cache -t cmlweb:v20.0 .
    ```
 
-3. **Build the Docker Image:**
-   Run the following command to build the image (disabling the cache is recommended to ensure you get the latest base layers):
-   ```bash
-   docker build --no-cache -t cml-web:v2.2 .
-   ```
-
-4. **Save the Image as a Tarball:**
+3. **Save the Image as a Tarball:**
    First, find the Image ID of your newly built runtime:
    ```bash
-   docker images | grep cml-web
+   docker images | grep cmlweb
    ```
-   Copy the `<image_id>` and save the image to a tar file so it can be uploaded or deployed to your environment:
+   Copy the `<image_id>` and save the image to a tar file so it can be uploaded and added to your CML environment as a custom runtime:
    ```bash
-   docker save -o cml-webv2.2.tar <image_id>
+   docker save -o cml-webv20.0.tar <image_id>
    ```
 
 ### 2. Application Creation on CML
-Once your runtime is built and available in your CML environment, you need to create the Application within your CML Project.
+CML Monitor is meant to run as an administrative CML Application. It is highly recommended to create a dedicated **Machine User** (e.g., `cml_monitor`) with `EnvironmentUser` and `ML Admin` privileges to run the application securely. Add this user as a Collaborator to your CML project.
 
-* **Startup Script:** Set the starting script to `run.py`. This script uses Gunicorn to serve the Flask application (`app.py`). 
-    * *Note:* Gunicorn is configured by default to run with 5 worker processes. You can modify this inside `run.py` to better suit your workload.
-* **Resource Requirements:** For the application to function smoothly, the **minimum recommended resources are 2 vCPU and 4 GB RAM**.
+Once the repo files are uploaded to your project and the runtime is registered, create the Application with these parameters:
 
-*(Please refer to the screenshot below for an example of the CML Application settings configuration)*
+* **Script:** `run.py` (Uses Gunicorn to serve the Flask application and background daemons).
+* **Run as Service Account:** Select your newly created Machine User (e.g., `cml_monitor`).
+* **Resource Profile:** Minimum recommended resources are **2 vCPU and 8 GiB Memory**.
+* **Environment Variables:**
+    * `WORK_DIR`: Path to the uploaded files (e.g., `/home/cdsw`).
+    * `POLL_INTERVAL`: `60` (Time in seconds for the background workload cache to refresh).
+    * `POD_CLUSTERING_WINDOW_SIZE`: `120` (CML API query window in minutes to prevent overloading the API on busy clusters).
 
-> **![Example CMLMonitor Application Settings](./docs/media/cmlmonitor_application_settings.png)**
-
+> **![CML Monitor Project Configs](./docs/media/cmlmontior_project_configs.png)**
 
 ### 3. Initial Application Boot
 When the application is launched for the very first time, it follows a strict initialization sequence:
 
-1.  **Create Admin Page:** If the database (SQLite) has no users, the application forces the creation of a local system administrator. Submitting this form initializes the `users` table, populates the `configs` table with default values, and redirects to the login screen.
+1.  **Create Admin Page:** If the database (SQLite) has no users, the application forces the creation of a local system administrator. Submitting this form initializes the tables and redirects to the login screen.
 2.  **Login Page:** Standard authentication interface. 
 3.  **Initial Setup Wizard:** Upon logging in, if the application detects it has not been configured (the `init` attribute in the DB is `0`), the admin is redirected to a 3-step setup wizard:
-    * **Step 1: CML Configs (Mandatory):** Requires the CML Workspace Domain, an Admin API Key, the user namespace prefix, and the `rke2.yaml` file (found on any ECS Master Server).
+    * **Step 1: CML Configs (Mandatory):** Requires the CML Workspace Domain, an Admin API Key, the Kubernetes namespace prefix (e.g., `pue-test-ai-user-`), the `rke2.yaml` file (found on any ECS Master Server), and the **ECS Web UI Base URL**.
     * **Step 2: LDAP Configs (Optional):** Active Directory settings for organizational user sync.
     * **Step 3: SMTP Alerts (Optional):** Email routing settings for automated reports and alerts.
+
+> **![Setup CML Configs](./docs/media/setup_cml_configs.png)**
+> **![CML Monitor Dashboard](./docs/media/cmlmonitor_dashboard.png)**
 
 ---
 
 ## Configurations
 
-Application settings are categorized into three main sections, accessible via the UI for users with the `config_admin` privilege:
+Application settings are accessible via the UI for users with the `config_admin` privilege. Version 2.0 expands these tabs to include comprehensive administrative controls:
 
 * **CML Configs (Mandatory):** The application cannot function without valid CML API credentials and the Kubernetes config file. 
-* **LDAP Configs (Optional):** Enables LDAP authentication. When enabled, standard LDAP users logging in will only see the workloads they have explicitly launched on CML (unless granted admin privileges).
-* **Alerts Configs (Optional):** Manages automated email routines based on cron expressions. 
-    * *Alert Cron:* Scans for sessions running $\ge$ 24 hours.
-    * *Report Cron:* Compiles and emails a summary of all running workloads.
-    * *Note:* If cron expressions are left blank, background processes will not run.
+* **LDAP Configs (Optional):** Enables LDAP authentication. Standard LDAP users logging in will only see the workloads they have explicitly launched.
+* **Alerts Configs (Optional):** Manages automated email routines based on cron expressions. Includes the new **Alert Dry Run** feature.
+* **User Management (New):** Add, edit, delete, and toggle roles (`is_admin`, `config_admin`) for users directly from the UI.
+* **System Logs (New):** Live streaming of internal application logs and background sync threads with auto-scrolling, eliminating the need to parse raw CML logs.
 
 ---
 
 ## User Management (CLI)
 
-While initial admin setup happens in the UI, subsequent user management is handled via the command-line script `cmlmonitor_db.py`. 
+> **Note on v2.0:** Full User Management is now integrated directly into the web UI via the Configurations page. However, the command-line script `cmlmonitor_db.py` remains available for backend operations or disaster recovery.
 
 ### Create a User
 Creates a local user. Use the flags `--is-admin` to allow the user to see all cluster workloads, and `--config-admin` to grant access to the settings page.
@@ -120,12 +121,13 @@ python cmlmonitor_db.py user delete -u [username]
 
 ## Database Architecture
 
-The backend currently utilizes **SQLite**. Below is an overview of the core SQLAlchemy models:
+The backend utilizes **SQLite** paired with **Alembic (Flask-Migrate)** for seamless schema migrations, allowing for application updates without reinstallation. Real-time workload states are cached asynchronously using a local **Valkey/Redis** instance.
+
+Below is an overview of the core SQLAlchemy models:
 
 * **`User` Model:** Manages authentication and authorization flags.
     * Stores `username`, `password` (nullable for LDAP/external users), `mail`, and `fullname`.
     * **Roles:** `is_admin` (View all workloads) and `config_admin` (Access configuration page).
-    * Tracks `created_at` and `updated_at`.
-* **`Config` Model:** Stores dynamic application settings as Key-Value pairs.
-    * Stores `attr` (attribute name) and `value`.
-    * Tracks the `updated_by` user via a foreign key relationship to the `User` table, ensuring accountability for system changes.
+* **`Config` Model:** Stores dynamic application settings as Key-Value pairs. Tracks the `updated_by` user via a foreign key relationship to ensure accountability.
+* **`Runtime` Model:** Stores synced CML runtimes (Images, Editor Names, Versions, and ENABLED/DISABLED statuses).
+* **`Job` Model:** Stores synced CML Jobs to build the unified Jobs dashboard, tracking schedules, resource requests, and real-time execution states.
