@@ -4,10 +4,9 @@ import math
 import redis
 import cmlapi
 import urllib3
-import logging
 import posixpath
+from logger import logger
 import concurrent.futures
-from pprint import pprint
 from urllib.parse import quote
 from collections import defaultdict
 from kubernetes import client, config
@@ -19,6 +18,7 @@ from extensions import db, app
 from ldap_utils import get_user_full_name
 from models import Runtime, Config, User, Job
 from utils import SearchFilters, WorkloadStatus, seconds_to_age, age_dict_tostring, keep_only_arabic, parse_quantity, sqlite_fix_timezone
+
 
 class CMLAPIManager:
     _instance = None
@@ -76,7 +76,7 @@ class CMLAPIManager:
             if self.WORKSPACE_DOMAIN and self.API_KEY:
                 self.cml_client = cmlapi.default_client(self.WORKSPACE_DOMAIN, self.API_KEY)
         except Exception as e:
-            logging.error(f"Error during CML/Kube initialization: {e}")
+            logger.error(f"Error during CML/Kube initialization: {e}")
 
         self._configured = True
 
@@ -108,7 +108,7 @@ class CMLAPIManager:
             project["url"] = posixpath.join(*parts)
             return project
         except Exception as e:
-            logging.error(f"Failed to capture project using ID: {project_id} with the following error: {e}")
+            logger.error(f"Failed to capture project using ID: {project_id} with the following error: {e}")
         return None
 
     def get_image_editor(self, image_url):
@@ -168,7 +168,7 @@ class CMLAPIManager:
             response = self.cml_client.get_short_user_by_id(user_id)
             return response.to_dict()["username"]
         except Exception as e:
-            logging.error(f"Exception when fetching username from namespace: {e}")
+            logger.error(f"Exception when fetching username from namespace: {e}")
             return None
 
     def check_cml_connection(self, domain=None, api_key=None):
@@ -291,7 +291,7 @@ class CMLAPIManager:
                     })
             return pods
         except ApiException as e:
-            logging.error(f"Exception when calling CoreV1Api->list_pod_for_all_namespaces:{e}\n")
+            logger.error(f"Exception when calling CoreV1Api->list_pod_for_all_namespaces:{e}\n")
             return []
 
     def get_running_sessions(self, start, end):
@@ -306,7 +306,7 @@ class CMLAPIManager:
             response = api_response.to_dict()
             return response["usage_response"]
         except cmlapi.rest.ApiException as e:
-            logging.error(f"Exception when calling CMLServiceApi->list_usage: {e}")
+            logger.error(f"Exception when calling CMLServiceApi->list_usage: {e}")
             return []
 
     def match_pods_with_cml_workload(self, pods, cml_workloads):
@@ -431,7 +431,7 @@ class CMLAPIManager:
         if not self.valkey.set("runtimes_sync_lock", "locked", nx=True, ex=60):
             return False
 
-        logging.info("Starting runtimes sync from CML API...")
+        logger.info("Starting runtimes sync from CML API...")
         try:
             response = self.cml_client.list_runtimes(page_size=1000)
             data = response.to_dict().get("runtimes", [])
@@ -486,10 +486,10 @@ class CMLAPIManager:
                         db.session.delete(db_runtime)
                         
                 db.session.commit()
-            logging.info("Successfully synced runtimes from CML API.")
+            logger.info("Successfully synced runtimes from CML API.")
             return True
         except Exception as e:
-            logging.error(f"Failed to sync runtimes: {e}")
+            logger.error(f"Failed to sync runtimes: {e}")
             return False
         finally:
             self.valkey.delete("runtimes_sync_lock")
@@ -624,7 +624,7 @@ class CMLAPIManager:
             return False, [], "A job sync is already in progress. Please wait."
 
         try:
-            logging.info("Starting threaded FULL jobs sync from CML API...")
+            logger.info("Starting threaded FULL jobs sync from CML API...")
             projects_response = self.cml_client.list_projects(page_size=1000, include_all_projects=True)
             projects = projects_response.to_dict().get("projects", [])
 
@@ -676,7 +676,7 @@ class CMLAPIManager:
                 db.session.commit()
             return True, jobs_payload, "Jobs fully synced."
         except Exception as e:
-            logging.error(f"Failed to run FULL sync jobs: {e}")
+            logger.error(f"Failed to run FULL sync jobs: {e}")
             return False, [], f"Sync failed: {e}"
         finally:
             self.valkey.delete("cml_jobs_sync_lock")
@@ -691,7 +691,7 @@ class CMLAPIManager:
             return False, {}, "A job sync is already in progress. Please wait."
 
         try:
-            logging.info("Starting threaded LIGHTWEIGHT jobs sync...")
+            logger.info("Starting threaded LIGHTWEIGHT jobs sync...")
             with app.app_context():
                 # Query all known jobs from DB
                 jobs = Job.query.all()
@@ -708,7 +708,7 @@ class CMLAPIManager:
 
             return True, updates, "Lightweight sync complete."
         except Exception as e:
-            logging.error(f"Failed to run LIGHTWEIGHT sync jobs: {e}")
+            logger.error(f"Failed to run LIGHTWEIGHT sync jobs: {e}")
             return False, {}, f"Sync failed: {e}"
         finally:
             self.valkey.delete("cml_jobs_sync_lock")
@@ -795,5 +795,5 @@ class CMLAPIManager:
 
             return sorted(result, key=lambda x: x["node_name"])
         except Exception as e:
-            logging.error(f"Error calculating node utilization: {e}")
+            logger.error(f"Error calculating node utilization: {e}")
             return []

@@ -2,10 +2,11 @@ import os
 import time
 import json
 import redis
-import logging
+from logger import logger
 from datetime import datetime, timezone
 from cmlapi_manager import CMLAPIManager
 from utils import WorkloadType, SearchFilters, OrderByFilters, WorkloadStatus
+
 
 # --- Custom JSON Encoder and Decoder for Datetime ---
 class DateTimeEncoder(json.JSONEncoder):
@@ -51,7 +52,7 @@ class WorkloadManager():
 
         try:
             self.valkey.set("cml_workload_sync_status", "running")
-            logging.info("Fetching workload data from CML API...")
+            logger.info("Fetching workload data from CML API...")
             
             raw_workloads, search_data = self.cmlapi_manager.workload_report()
             grouped_workloads = self.group_workload_by_id(raw_workloads)
@@ -59,11 +60,11 @@ class WorkloadManager():
             self.valkey.set("cml_workloads", json.dumps(grouped_workloads, cls=DateTimeEncoder))
             self.valkey.set("cml_search_data", json.dumps(search_data, cls=DateTimeEncoder))
             
-            logging.info("Successfully updated Valkey cache.")
+            logger.info("Successfully updated Valkey cache.")
             self.valkey.set("cml_workload_sync_status", "success")
             return True, "Workload cache updated."
         except Exception as e:
-            logging.error(f"Error fetching/caching data: {e}")
+            logger.error(f"Error fetching/caching data: {e}")
             self.valkey.set("cml_workload_sync_status", "failed")
             return False, str(e)
         finally:
@@ -161,14 +162,14 @@ class WorkloadManager():
 
             if success:
                 self.valkey.set("cml_jobs", json.dumps(jobs_payload, cls=DateTimeEncoder))
-                logging.info(msg)
+                logger.info(msg)
                 self.valkey.set("cml_heavy_sync_status", "success")
             else:
                 self.valkey.set("cml_heavy_sync_status", "failed")
 
             return success, msg
         except Exception as e:
-            logging.error(f"Error executing Full Jobs cache: {e}")
+            logger.error(f"Error executing Full Jobs cache: {e}")
             self.valkey.set("cml_heavy_sync_status", "failed")
             return False, str(e)
 
@@ -191,10 +192,10 @@ class WorkloadManager():
                         job["last_run_status"] = run_data["status"]
 
                 self.valkey.set("cml_jobs", json.dumps(jobs_payload, cls=DateTimeEncoder))
-                logging.info(msg)
+                logger.info(msg)
             return success, msg
         except Exception as e:
-            logging.error(f"Error executing Lightweight Jobs cache: {e}")
+            logger.error(f"Error executing Lightweight Jobs cache: {e}")
             return False, str(e)
 
     def get_jobs(self, user, search_filters):
@@ -327,7 +328,7 @@ class WorkloadManager():
                                         workload["status"] = WorkloadStatus.STUCK
                                         workload["reason"] = "Parent Job has a more recent run"
                                 except Exception as e:
-                                    logging.error(f"Failed to compare finished_at for parent job {parent_job['id']}: {e}")
+                                    logger.error(f"Failed to compare finished_at for parent job {parent_job['id']}: {e}")
 
         return grouped_workloads
 
@@ -352,10 +353,9 @@ class WorkloadManager():
             node_stats = self.cmlapi_manager.get_worker_node_utilization()
             self.valkey.set("cml_node_utilization", json.dumps(node_stats))
         except Exception as e:
-            logging.error(f"Error caching node utilization: {e}")
+            logger.error(f"Error caching node utilization: {e}")
 
     def get_node_utilization(self):
         """Reads worker node metrics from Valkey."""
         cached_data = self.valkey.get("cml_node_utilization")
         return json.loads(cached_data) if cached_data else []
-    

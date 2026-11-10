@@ -5,7 +5,6 @@ import signal
 import subprocess
 from gunicorn.app.base import BaseApplication
 
-# Safe fallback for WORK_DIR
 work_dir = os.getenv("WORK_DIR", ".")
 os.chdir(work_dir)
 
@@ -90,6 +89,37 @@ if __name__ == "__main__":
 
         from app import app
 
+        logconfig_dict = {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": {
+                "custom": {
+                    "format": "[%(levelname)s] %(asctime)s [%(process)d:%(threadName)s] - %(message)s",
+                    "datefmt": "%Y-%m-%d %H:%M:%S",
+                }
+            },
+            "handlers": {
+                "file_handler": {
+                    "class": "logging.FileHandler",
+                    "filename": "/home/cdsw/app.log",
+                    "formatter": "custom",
+                    "level": "INFO"
+                },
+                "console": {
+                    "class": "logging.StreamHandler",
+                    "formatter": "custom",
+                    "level": "INFO"
+                }
+            },
+            "loggers": {
+                "gunicorn.error": {
+                    "level": "INFO",
+                    "handlers": ["file_handler"],
+                    "propagate": False
+                }
+            }
+        }
+
         # 3. Launch Gunicorn Application
         PORT = int(os.environ["CDSW_APP_PORT"])
         options = {
@@ -97,7 +127,7 @@ if __name__ == "__main__":
             'workers': 4,
             'timeout': 90,
             'accesslog': '-',
-            'errorlog': '-'
+            'logconfig_dict': logconfig_dict
         }
 
         print(f"Starting Gunicorn server on {options['bind']} with {options['workers']} workers ...")

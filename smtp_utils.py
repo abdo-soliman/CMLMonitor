@@ -1,10 +1,11 @@
-import logging
 import smtplib
+from logger import logger
 from os.path import basename
 from email.mime.text import MIMEText
 from email.message import EmailMessage
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
+
 
 def send_email(
         smtp_server,
@@ -42,9 +43,9 @@ def send_email(
             server.starttls()  # Secure the connection
         server.login(smtp_user, smtp_password)
         server.sendmail(sender_email, recipient_emails, msg.as_string())
-        logging.info(f"Alert Email sent to the following recipients: {recipient_emails}")
+        logger.info(f"Alert Email sent to the following recipients: {recipient_emails}")
     except Exception as e:
-        logging.error(f"Error sending email: {e}")
+        logger.error(f"Error sending email: {e}")
     finally:
         server.quit()
 

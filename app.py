@@ -7,11 +7,11 @@ import io
 import ast
 import time
 import json
-import logging
 import tempfile
 import threading
 import subprocess
 import pandas as pd
+from logger import logger
 from sqlalchemy import event
 from datetime import datetime
 from pydantic import ValidationError
@@ -32,17 +32,8 @@ from ldap_utils import is_ldap_enabled, authenticate_and_user_data, validate_lda
 from utils import WorkloadType, SearchFilters, OrderByFilters, pagination_to_indecies, is_none_or_empty, keep_only_arabic
 
 
-logging.basicConfig(
-    filename="/home/cdsw/app.log",
-    filemode="a",
-    level=logging.INFO,
-    format="[%(levelname)s] %(asctime)s [%(process)d:%(threadName)s] - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
-
 app.secret_key = 'super_secret_key'  # Change this in production
 
-# Add this line to link migrations to your app and db
 migrate = Migrate(app, db, render_as_batch=True) 
 
 # --- Flask-Login Initialization ---
@@ -116,7 +107,7 @@ def init_background_services():
         workload_manager = WorkloadManager()
 
     workload_manager.fetch_and_cache()
-    print("Background services initialized and caching started.")
+    logger.info("Background services initialized and caching started.")
 
     app_context = app.app_context()
     t = threading.Thread(target=runtime_sync_daemon, args=(app_context,), daemon=True)
@@ -146,7 +137,7 @@ with app.app_context():
     try:
         # 1. Migrate database to latest schema (creates it if it doesn't exist)
         upgrade()
-        print("Database schema successfully migrated/verified.")
+        logger.info("Database schema successfully migrated/verified.")
         
         # 2. Keep configs table up to date (adds missing defaults for new updates)
         admin_user = db.session.execute(db.select(User).filter_by(config_admin=True)).scalars().first()
@@ -161,7 +152,7 @@ with app.app_context():
             # 4. Sync alert subprocesses
             enabled_conf = Config.query.filter_by(attr='alert.enabled').first()
             if enabled_conf and enabled_conf.value == '1':
-                print("Alerts enabled in DB. Syncing background processes...")
+                logger.info("Alerts enabled in DB. Syncing background processes...")
                 alert_cron_conf = Config.query.filter_by(attr='alert.runtime.alert_cron').first()
                 report_cron_conf = Config.query.filter_by(attr='alert.runtime.report_cron').first()
 
@@ -171,7 +162,7 @@ with app.app_context():
                     process_manager.start_process('report', '1s')
                     
     except Exception as e:
-        logging.error(f"Skipping startup sequence initialization (DB likely on Day-0): {e}")
+        logger.error(f"Skipping startup sequence initialization (DB likely on Day-0): {e}")
 
 
 def sync_alert_processes(app):
@@ -183,7 +174,7 @@ def sync_alert_processes(app):
         try:
             enabled_conf = Config.query.filter_by(attr='alert.enabled').first()
             if enabled_conf and enabled_conf.value == '1':
-                print("Alerts enabled in DB. Syncing background processes...")
+                logger.info("Alerts enabled in DB. Syncing background processes...")
 
                 alert_cron_conf = Config.query.filter_by(attr='alert.runtime.alert_cron').first()
                 report_cron_conf = Config.query.filter_by(attr='alert.runtime.report_cron').first()
@@ -201,7 +192,7 @@ def sync_alert_processes(app):
                 process_manager.stop_all()
 
         except Exception as e:
-            print(f"Warning: Could not sync background processes: {e}")
+            logger.warning(f"Could not sync background processes: {e}")
 
 
 # trigger alert process sync on config table changes
@@ -217,7 +208,7 @@ def receive_config_update(mapper, connection, target):
         # Check SQLAlchemy's history to ensure the 'value' column actually changed
         state = db.inspect(target)
         if state.attrs.value.history.has_changes():
-            print(f"Config '{target.attr}' updated. Triggering process sync...")
+            logger.info(f"Config '{target.attr}' updated. Triggering process sync...")
             
             # Spin off a thread so process_manager doesn't block the DB commit
             # We use _get_current_object() to safely pass the app to the thread
@@ -336,7 +327,7 @@ def create_admin():
             db.session.query(User).delete()
             db.session.commit()
         except Exception as rollback_err:
-            print(f"Critical Rollback Error: {rollback_err}")
+            logger.error(f"Critical Rollback Error: {rollback_err}")
 
         return jsonify({"success": False, "message": f"Initialization failed: {str(e)}"}), 500
 
@@ -386,7 +377,7 @@ def login():
             
         except Exception as e:
             db.session.rollback()
-            logging.error(f"Login error for user {username}: {e}")
+            logger.error(f"Login error for user {username}: {e}")
             return render_template('login.html', error="Invalid credentials")
 
     return render_template('login.html')
@@ -1391,7 +1382,7 @@ def download_excel():
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     except Exception as e:
-        logging.error(f"Failed to generate report: {e}")
+        logger.error(f"Failed to generate report: {e}")
         return jsonify({"error": str(e)}), 500
 
 

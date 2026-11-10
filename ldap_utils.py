@@ -1,5 +1,5 @@
-import logging
 from flask import Flask
+from logger import logger
 from models import Config
 from extensions import db, app
 from ldap3 import Server, Connection, ALL, SUBTREE
@@ -155,7 +155,7 @@ def authenticate_and_user_data(username, password):
         except LDAPBindError:
             return None
         except LDAPException as e:
-            print(f"LDAP Error: {e}")
+            logger.error(f"LDAP Error: {e}")
             return None
 
 
@@ -193,6 +193,6 @@ def get_user_full_name(username):
             conn.unbind()
             return display_name
         except Exception as e:
-            logging.info(f"Connection to LDAP Server failed with error: {e}, ignoring user display name for user: {username}")
+            logger.info(f"Connection to LDAP Server failed with error: {e}, ignoring user display name for user: {username}")
     
         return None
