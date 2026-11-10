@@ -12,6 +12,7 @@ async function testCML() {
     const domain = document.getElementById('cml_domain').value.trim();
     const apiKey = document.getElementById('cml_apikey').value.trim();
     const prefix = document.getElementById('cml_prefix').value.trim();
+    const ECSWebUIBaseUrl = document.getElementById('ecs_webui_base_url').value.trim();
     const fileInput = document.getElementById('cml_kubeconfig'); // The new file input
     const alertBox = document.getElementById('cml-alert');
     const btn = document.getElementById('btn-test-cml');
@@ -40,7 +41,8 @@ async function testCML() {
     setupData['cml_workspace_domain'] = domain;
     setupData['cml_api_key'] = apiKey;
     setupData['cml_namespace_prefix'] = prefix;
-    setupData['cml_kubeconfig_content'] = fileText; 
+    setupData['cml_kubeconfig_content'] = fileText;
+    setupData['ecs_webui_base_url'] = ECSWebUIBaseUrl;
 
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Verifying...';
 

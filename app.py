@@ -605,6 +605,7 @@ def save_setup():
         'cml_workspace_domain': 'cml.workspace_domain',
         'cml_api_key': 'cml.api_key',
         'cml_namespace_prefix': 'cml.namespace_prefix',
+        'ecs_webui_base_url': "cml.ecs_webui_base_url",
         'ldap_enabled': 'ldap.enabled',
         'ldap_server': 'ldap.server',
         'ldap_port': 'ldap.port',

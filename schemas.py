@@ -14,6 +14,7 @@ class SetupSchema(BaseModel):
     cml_api_key: str
     cml_namespace_prefix: str
     cml_kubeconfig_content: str
+    ecs_webui_base_url: str
 
     ldap_enabled: bool = False
     ldap_server: str = ""
